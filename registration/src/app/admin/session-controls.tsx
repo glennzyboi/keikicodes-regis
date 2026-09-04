@@ -15,11 +15,11 @@ export function SessionControls({ sessionId, label }: { sessionId: string; label
 
   if (open === "none") {
     return (
-      <div className="mt-4 flex justify-end gap-2 border-t border-hairline pt-4">
-        <button className="kc-btn kc-btn-quiet text-sm" onClick={() => setOpen("cancel")}>
+      <div className="mt-4 flex justify-end gap-2 border-t border-[var(--ops-line-soft)] pt-4">
+        <button className="ops-btn" onClick={() => setOpen("cancel")}>
           Cancel next class
         </button>
-        <button className="kc-btn kc-btn-quiet text-sm" onClick={() => setOpen("move")}>
+        <button className="ops-btn" onClick={() => setOpen("move")}>
           Move next class
         </button>
       </div>
@@ -27,8 +27,8 @@ export function SessionControls({ sessionId, label }: { sessionId: string; label
   }
 
   return (
-    <div className="mt-4 border-t border-hairline pt-4">
-      <p className="text-sm text-ink-soft">
+    <div className="mt-4 border-t border-[var(--ops-line-soft)] pt-4">
+      <p className="text-[var(--ops-muted)]">
         {open === "cancel" ? "Cancel" : "Move"} the class on {label}. Everyone keeps their
         place either way, only this date changes.
       </p>
@@ -41,7 +41,7 @@ export function SessionControls({ sessionId, label }: { sessionId: string; label
 
         {open === "move" && (
           <div>
-            <label htmlFor={`date-${sessionId}`} className="kc-label">
+            <label htmlFor={`date-${sessionId}`} className="ops-label">
               New date
             </label>
             <input
@@ -49,19 +49,19 @@ export function SessionControls({ sessionId, label }: { sessionId: string; label
               name="newDate"
               type="date"
               required
-              className="kc-field"
+              className="ops-field"
             />
           </div>
         )}
 
         <div className="flex-1 min-w-48">
-          <label htmlFor={`note-${sessionId}`} className="kc-label">
+          <label htmlFor={`note-${sessionId}`} className="ops-label">
             What should parents be told?
           </label>
           <input
             id={`note-${sessionId}`}
             name="note"
-            className="kc-field"
+            className="ops-field"
             placeholder="Instructor out sick"
           />
         </div>
@@ -69,12 +69,12 @@ export function SessionControls({ sessionId, label }: { sessionId: string; label
         <div className="flex gap-2">
           <button
             type="button"
-            className="kc-btn kc-btn-quiet text-sm"
+            className="ops-btn"
             onClick={() => setOpen("none")}
           >
             Never mind
           </button>
-          <button className="kc-btn kc-btn-primary text-sm">
+          <button className="ops-btn ops-btn-primary">
             {open === "cancel" ? "Cancel this date" : "Move it"}
           </button>
         </div>

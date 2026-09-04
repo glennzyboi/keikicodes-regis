@@ -9,7 +9,7 @@ export function LoginForm() {
   return (
     <form action={formAction} className="mt-8 space-y-4">
       <div>
-        <label htmlFor="email" className="kc-label">
+        <label htmlFor="email" className="ops-label">
           Email
         </label>
         <input
@@ -18,12 +18,12 @@ export function LoginForm() {
           type="email"
           required
           autoComplete="username"
-          className="kc-field"
+          className="ops-field w-full"
         />
       </div>
 
       <div>
-        <label htmlFor="password" className="kc-label">
+        <label htmlFor="password" className="ops-label">
           Password
         </label>
         <input
@@ -32,17 +32,17 @@ export function LoginForm() {
           type="password"
           required
           autoComplete="current-password"
-          className="kc-field"
+          className="ops-field w-full"
         />
       </div>
 
       {error && (
-        <p role="alert" className="kc-alert">
+        <p role="alert" className="rounded-md bg-[var(--ops-danger-soft)] px-3 py-2 text-[var(--ops-danger)]">
           {error}
         </p>
       )}
 
-      <button className="kc-btn kc-btn-primary w-full" disabled={pending}>
+      <button className="ops-btn ops-btn-primary w-full" disabled={pending}>
         {pending ? "Signing in" : "Sign in"}
       </button>
     </form>

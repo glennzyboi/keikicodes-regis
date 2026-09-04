@@ -58,6 +58,14 @@ export async function POST(req: Request) {
       case "checkout.session.expired":
         await expire(event.data.object as Stripe.Checkout.Session);
         break;
+      // A refund is not instant. It leaves as pending and Stripe tells us later
+      // whether it landed, so the admin reflects what actually happened rather
+      // than what we asked for.
+      case "refund.created":
+      case "refund.updated":
+      case "refund.failed":
+        await syncRefund(event.data.object as Stripe.Refund);
+        break;
       default:
         break;
     }
@@ -148,6 +156,41 @@ async function fulfil(session: Stripe.Checkout.Session) {
   // where the confirmation email is queued; locally it is logged, and the link
   // is the same signed portal link the email would carry.
   console.log(`[webhook] order ${orderId} fulfilled. Portal link: ${portalUrl(parentId)}`);
+}
+
+/**
+ * Stripe's word on a refund, which outranks ours.
+ *
+ * refund_owed only clears on succeeded. A refund that fails after we thought it
+ * had gone out comes back onto the list here, with the reason attached.
+ */
+async function syncRefund(refund: Stripe.Refund) {
+  const succeeded = refund.status === "succeeded";
+
+  // Stripe sends refund.created and refund.updated for the same refund, often
+  // both already succeeded. Only write to the ledger when the status actually
+  // moved, so the audit trail reads as a history rather than as noise.
+  // RETURNING reports the new row, so the previous status comes from a
+  // self-join against the pre-update snapshot instead.
+  const updated = await sql<{ id: string; changed: boolean }[]>`
+    update enrollments e
+       set refund_status = ${refund.status ?? "pending"},
+           refund_amount_cents = ${refund.amount},
+           refund_owed = ${!succeeded},
+           refunded_at = ${succeeded ? sql`now()` : null},
+           refund_error = ${refund.failure_reason ?? null}
+      from enrollments before
+     where before.id = e.id
+       and (e.stripe_refund_id = ${refund.id}
+            or e.id = ${(refund.metadata?.enrollment_id as string) ?? null})
+    returning e.id,
+              (before.refund_status is distinct from ${refund.status ?? "pending"}) as changed`;
+
+  if (updated.length === 0 || !updated[0].changed) return;
+
+  await sql`insert into enrollment_events (enrollment_id, event, payload)
+            values (${updated[0].id}, 'refund_' || ${refund.status ?? "updated"},
+                    ${JSON.stringify({ stripe_refund_id: refund.id, amount_cents: refund.amount })}::jsonb)`;
 }
 
 /** An abandoned checkout: mark it and let the sweeper return the seats. */

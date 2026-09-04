@@ -1,0 +1,486 @@
+/* =====================================================================
+   OPS LAYER
+
+   The office console is a different product from the parent facing site.
+   Staff read it for hours and already know what the words mean, so it drops
+   the brand entirely: dark rail, neutral surfaces, Inter at 13px, tight rows,
+   and numbers in tabular figures so columns of money line up.
+
+   This file is imported by the admin layout and nowhere else, so the split is
+   enforced by the module graph rather than by everyone remembering.
+   ===================================================================== */
+.ops {
+  --ops-bg: #f7f8fa;
+  --ops-surface: #ffffff;
+  --ops-line: #e4e7ec;
+  --ops-line-soft: #eff1f4;
+  --ops-text: #101828;
+  --ops-muted: #667085;
+  --ops-faint: #98a2b3;
+
+  --ops-rail: #14181f;
+  --ops-rail-soft: #1d232d;
+  --ops-rail-text: #98a2b3;
+  --ops-rail-active: #22c58b;
+
+  --ops-accent: #2563eb;
+  --ops-accent-soft: #eaf1fe;
+  --ops-good: #067a51;
+  --ops-good-soft: #e6f6ef;
+  --ops-warn: #a15c07;
+  --ops-warn-soft: #fdf4e3;
+  --ops-danger: #b42318;
+  --ops-danger-soft: #fdecea;
+  --ops-violet: #7839ee;
+  --ops-violet-soft: #f2ebfe;
+
+  --ops-ease: cubic-bezier(0.23, 1, 0.32, 1);
+
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ops-text);
+  background: var(--ops-bg);
+  min-height: 100vh;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.ops h1,
+.ops h2,
+.ops h3 {
+  font-family: inherit;
+  letter-spacing: -0.014em;
+}
+
+/* ------------------------------------------------------------------ shell */
+.ops-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+@media (max-width: 1024px) {
+  .ops-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ops-rail {
+  background: var(--ops-rail);
+  color: #fff;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 1024px) {
+  .ops-rail {
+    position: static;
+    height: auto;
+  }
+}
+
+.ops-rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.ops-rail-group {
+  padding: 0 12px;
+  margin-top: 18px;
+}
+.ops-rail-label {
+  padding: 0 8px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.38);
+}
+
+.ops-rail-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--ops-rail-text);
+  font-weight: 500;
+  position: relative;
+  transition: background-color 130ms ease, color 130ms ease;
+}
+@media (hover: hover) {
+  .ops-rail-link:hover {
+    background: var(--ops-rail-soft);
+    color: #fff;
+  }
+}
+.ops-rail-link[data-active="true"] {
+  background: var(--ops-rail-soft);
+  color: #fff;
+}
+.ops-rail-link[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  transform: translateY(-50%);
+  border-radius: 0 3px 3px 0;
+  background: var(--ops-rail-active);
+}
+.ops-rail-link svg {
+  flex: none;
+  opacity: 0.8;
+}
+.ops-rail-link[data-active="true"] svg {
+  opacity: 1;
+  color: var(--ops-rail-active);
+}
+
+.ops-rail-foot {
+  margin-top: auto;
+  padding: 14px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.ops-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* ----------------------------------------------------------------- topbar */
+.ops-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 20px;
+  background: color-mix(in oklab, var(--ops-surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--ops-line);
+}
+.ops-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  min-width: 240px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  background: var(--ops-bg);
+  color: var(--ops-faint);
+}
+.ops-kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--ops-line);
+  border-radius: 4px;
+  background: var(--ops-surface);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ops-faint);
+}
+
+/* ----------------------------------------------------------------- panels */
+.ops-panel {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-line);
+  border-radius: 12px;
+}
+.ops-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.ops-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ops-line-soft);
+}
+.ops-row:last-child {
+  border-bottom: 0;
+}
+@media (hover: hover) {
+  .ops-row:hover {
+    background: #fbfcfd;
+  }
+}
+
+/* ------------------------------------------------------------------ stats */
+.ops-stat {
+  padding: 16px;
+}
+.ops-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.ops-stat-value {
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.ops-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.ops-delta-up {
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+.ops-delta-down {
+  background: var(--ops-danger-soft);
+  color: var(--ops-danger);
+}
+.ops-delta-flat {
+  background: var(--ops-line-soft);
+  color: var(--ops-muted);
+}
+
+.ops-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ops-faint);
+}
+
+/* ------------------------------------------------------------------ pills */
+.ops-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ops-pill-good {
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+.ops-pill-warn {
+  background: var(--ops-warn-soft);
+  color: var(--ops-warn);
+}
+.ops-pill-danger {
+  background: var(--ops-danger-soft);
+  color: var(--ops-danger);
+}
+.ops-pill-quiet {
+  background: var(--ops-line-soft);
+  color: var(--ops-muted);
+}
+.ops-pill-info {
+  background: var(--ops-accent-soft);
+  color: var(--ops-accent);
+}
+.ops-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* --------------------------------------------------------------- controls */
+.ops-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--ops-line);
+  background: var(--ops-surface);
+  color: var(--ops-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: transform 130ms var(--ops-ease), background-color 130ms ease,
+    border-color 130ms ease;
+}
+.ops-btn:active {
+  transform: scale(0.97);
+}
+.ops-btn:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 1px;
+}
+.ops-btn:disabled {
+  opacity: 0.5;
+}
+@media (hover: hover) {
+  .ops-btn:hover:not(:disabled) {
+    background: #f4f6f8;
+  }
+}
+
+.ops-btn-primary {
+  background: var(--ops-accent);
+  border-color: var(--ops-accent);
+  color: #fff;
+}
+@media (hover: hover) {
+  .ops-btn-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+  }
+}
+.ops-btn-danger {
+  background: var(--ops-danger);
+  border-color: var(--ops-danger);
+  color: #fff;
+}
+.ops-btn[data-chosen="true"] {
+  border-color: var(--ops-accent);
+  background: var(--ops-accent-soft);
+  color: var(--ops-accent);
+}
+
+.ops-field {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  background: var(--ops-surface);
+  font: inherit;
+  color: var(--ops-text);
+  transition: border-color 130ms ease, box-shadow 130ms var(--ops-ease);
+}
+.ops-field:focus {
+  outline: none;
+  border-color: var(--ops-accent);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.14);
+}
+
+.ops-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--ops-faint);
+}
+
+/* ------------------------------------------------------------------ table */
+.ops-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ops-table th {
+  text-align: left;
+  padding: 9px 16px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ops-faint);
+  border-bottom: 1px solid var(--ops-line);
+  white-space: nowrap;
+}
+.ops-table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--ops-line-soft);
+  vertical-align: middle;
+}
+.ops-table tr:last-child td {
+  border-bottom: 0;
+}
+@media (hover: hover) {
+  .ops-table tbody tr:hover {
+    background: #fbfcfd;
+  }
+}
+.ops-num {
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------ meter */
+.ops-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ops-line-soft);
+  overflow: hidden;
+}
+.ops-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ops-accent);
+  transition: width 380ms var(--ops-ease);
+}
+.ops-meter[data-tone="full"] > span {
+  background: var(--ops-warn);
+}
+.ops-meter[data-tone="good"] > span {
+  background: var(--ops-good);
+}
+
+/* --------------------------------------------------------------- activity */
+.ops-feed-item {
+  display: flex;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--ops-line-soft);
+}
+.ops-feed-item:last-child {
+  border-bottom: 0;
+}
+
+/* Entrance, transitions not keyframes so a re-render retargets rather than
+   restarting. Never from scale(0). */
+.ops-enter {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms var(--ops-ease), transform 240ms var(--ops-ease);
+}
+@starting-style {
+  .ops-enter {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-btn:active {
+    transform: none;
+  }
+  .ops-meter > span {
+    transition: none;
+  }
+  @starting-style {
+    .ops-enter {
+      opacity: 0;
+      transform: none;
+    }
+  }
+}

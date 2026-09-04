@@ -16,10 +16,6 @@ export const stripe = new Stripe(key, {
 
 export const isTestMode = key.startsWith("sk_test_");
 
-/** Money is integer minor units everywhere. Never a float, never a string. */
-export function formatMoney(cents: number, currency = "usd") {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(cents / 100);
-}
+// Re-exported for the server side, which already imports this module anyway.
+// Client components must import from lib/money directly.
+export { formatMoney } from "./money";

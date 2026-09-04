@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer, currentStaff } from "@/lib/staff-auth";
 import { asUser } from "@/lib/rls";
+import { issueRefund } from "@/lib/refunds";
 
 export async function signIn(_prev: string | null, formData: FormData): Promise<string | null> {
   const email = String(formData.get("email") ?? "");
@@ -32,38 +33,51 @@ export async function signOut() {
 }
 
 /**
- * Approve a cancellation a parent asked for.
+ * Approve a cancellation, free the seat, and send the money back.
  *
- * This is the moment the seat actually goes back, and it is deliberately the
- * only moment. release_seat() decrements the counter, and the enrollment keeps
- * refund_owed set so the money side stays visible until someone marks it done.
+ * The refund is issued through Stripe here rather than left as a note for
+ * someone to action later, because the step that lives on a sticky note is the
+ * step that gets missed. The seat is freed inside the transaction; the Stripe
+ * call happens after it commits, so a slow network never holds a row lock.
  */
 export async function approveCancellation(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
   const enrollmentId = String(formData.get("enrollmentId"));
+  const refundCents = Number(formData.get("refundCents") ?? 0);
 
-  await asUser(staff.authUserId, async (tx) => {
+  const freed = await asUser(staff.authUserId, async (tx) => {
     const [enrollment] = await tx<{ id: string; class_offering_id: string }[]>`
       update enrollments
          set status = 'cancelled', cancelled_at = now()
        where id = ${enrollmentId} and status = 'cancellation_requested'
       returning id, class_offering_id`;
 
-    if (!enrollment) return;
+    if (!enrollment) return false;
 
     await tx`select release_seat(${enrollment.class_offering_id})`;
     await tx`insert into enrollment_events (enrollment_id, event, payload)
              values (${enrollment.id}, 'cancellation_approved',
-                     ${JSON.stringify({ by: staff.email })}::jsonb)`;
+                     ${JSON.stringify({ by: staff.email, refund_cents: refundCents })}::jsonb)`;
+    return true;
   });
+
+  // Only refund a cancellation this call actually approved. Without this a
+  // second click would try to refund an already cancelled place.
+  if (freed && refundCents > 0) {
+    await issueRefund(enrollmentId, refundCents, staff.email);
+  }
 
   revalidatePath("/admin");
 }
 
-/** The parent changed their mind, or the office said no. The seat was never
- *  given up, so this is only a status change. */
+/**
+ * The parent changed their mind, or the office said no.
+ *
+ * The seat was never given up, so this is only a status change and no money
+ * moves. That is the whole point of holding the seat through the request.
+ */
 export async function declineCancellation(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
@@ -86,7 +100,27 @@ export async function declineCancellation(formData: FormData) {
   revalidatePath("/admin");
 }
 
-/** The refund has been paid out in Stripe by hand. Clear the flag. */
+/** A refund that failed at Stripe, sent again. Same idempotency key, so if the
+ *  first attempt did land despite the error, this returns it rather than
+ *  paying the family a second time. */
+export async function retryRefund(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const enrollmentId = String(formData.get("enrollmentId"));
+  const refundCents = Number(formData.get("refundCents") ?? 0);
+
+  await issueRefund(enrollmentId, refundCents, staff.email);
+  revalidatePath("/admin");
+}
+
+/**
+ * Close out a refund that was handled outside the system.
+ *
+ * Kept for the cases automation cannot reach: a payment taken before this
+ * system existed, a bank transfer, a credit against next term. It records who
+ * decided it was settled rather than silently clearing the flag.
+ */
 export async function markRefunded(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");

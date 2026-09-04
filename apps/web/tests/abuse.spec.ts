@@ -382,6 +382,85 @@ test.describe("a family cannot reach another family's things", () => {
     expect(child.photo_path).toBe(`${mine}/my-own-child.jpg`);
   });
 
+  test("a child's photograph is readable by their family and staff, and nobody else", async ({
+    request,
+  }) => {
+    // The most sensitive thing this system holds. The bucket is private and the
+    // policy keys on the first path segment being the reader's own parents row,
+    // so this is a string comparison rather than a join, and there is no way to
+    // widen it by getting a query wrong.
+    //
+    // Checked with real tokens against real storage, because "the bucket is
+    // private" is a claim about configuration and this is a claim about
+    // behaviour.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+    const token = async (email: string, password: string) => {
+      const res = await request.post(`${url}/auth/v1/token?grant_type=password`, {
+        headers: { apikey: anon, "content-type": "application/json" },
+        data: { email, password },
+      });
+      return (await res.json()).access_token as string;
+    };
+
+    // A family with a photo on file.
+    const owner = `${unique("owner")}@example.test`;
+    const [{ id: ownerId }] = await sql<{ id: string }[]>`
+      insert into parents (email, full_name) values (${owner}, 'Owner Family')
+      returning id`;
+
+    // Put an object in their folder using the service role, the way an upload
+    // would land it.
+    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const key = `${ownerId}/probe.jpg`;
+    const put = await request.post(`${url}/storage/v1/object/child-photos/${key}`, {
+      headers: {
+        apikey: service,
+        Authorization: `Bearer ${service}`,
+        "content-type": "image/jpeg",
+      },
+      data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    expect(put.ok(), await put.text()).toBeTruthy();
+
+    // Give that family a login so it can try to read its own.
+    const ownerToken = await (async () => {
+      const res = await request.post(`${url}/auth/v1/signup`, {
+        headers: { apikey: anon, "content-type": "application/json" },
+        data: { email: owner, password: "TestParent!2026" },
+      });
+      const body = await res.json();
+      // Link the auth user to the parents row the way currentParent would.
+      if (body.user?.id) {
+        await sql`update parents set auth_user_id = ${body.user.id} where id = ${ownerId}`;
+      }
+      return (body.access_token as string) ?? (await token(owner, "TestParent!2026"));
+    })();
+
+    const otherToken = await token("parent@keikicoders.test", "KeikiParent!2026");
+    const staffToken = await token("ops@keikicoders.test", "KeikiOps!2026");
+
+    const read = async (bearer?: string) => {
+      const res = await request.get(`${url}/storage/v1/object/child-photos/${key}`, {
+        headers: bearer
+          ? { apikey: anon, Authorization: `Bearer ${bearer}` }
+          : { apikey: anon },
+      });
+      return res.status();
+    };
+
+    expect(await read(ownerToken), "the family can see their own child").toBe(200);
+    expect(await read(staffToken), "so can the office").toBe(200);
+    expect(await read(otherToken), "another family cannot").not.toBe(200);
+    expect(await read(), "and nobody at all certainly cannot").not.toBe(200);
+
+    await request.delete(`${url}/storage/v1/object/child-photos/${key}`, {
+      headers: { apikey: service, Authorization: `Bearer ${service}` },
+    });
+    await sql`delete from parents where id = ${ownerId}`;
+  });
+
   test("a link in imported data can only ever be http or https", async () => {
     // Their register links are rendered into an href a parent clicks. new URL()
     // accepts "javascript:alert(1)" quite happily, so the scheme is checked.

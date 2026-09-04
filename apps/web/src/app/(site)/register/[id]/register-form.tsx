@@ -263,7 +263,8 @@ export default function RegisterForm({
           data.reason === "already_enrolled" ||
           data.reason === "schedule_conflict" ||
           data.reason === "grade_not_eligible" ||
-          data.reason === "registered_elsewhere"
+          data.reason === "registered_elsewhere" ||
+          data.reason === "photo_not_yours"
         ) {
           setError(data.detail);
         } else if (data.reason === "class_not_available") {

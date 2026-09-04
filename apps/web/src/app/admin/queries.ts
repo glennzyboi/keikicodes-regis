@@ -343,6 +343,10 @@ export type ChildRow = {
   last_name: string;
   date_of_birth: string;
   notes: string | null;
+  grade: number | null;
+  photo_path: string | null;
+  in_afterschool_care: boolean;
+  afterschool_care_program: string | null;
   parent_id: string;
   parent_name: string;
   parent_email: string;
@@ -354,6 +358,7 @@ export function childRows(tx: TransactionSql, opts: { parentId?: string; search?
   return tx<ChildRow[]>`
     select ch.id as child_id, ch.first_name, ch.last_name,
            to_char(ch.date_of_birth, 'YYYY-MM-DD') as date_of_birth, ch.notes,
+           ch.grade, ch.photo_path, ch.in_afterschool_care, ch.afterschool_care_program,
            p.id as parent_id, p.full_name as parent_name, p.email as parent_email,
            (select count(*)::int from enrollments e
              where e.child_id = ch.id
@@ -376,6 +381,10 @@ export type EnrollmentRow = {
   status: string;
   child_id: string;
   child_name: string;
+  grade: number | null;
+  photo_path: string | null;
+  in_afterschool_care: boolean;
+  afterschool_care_program: string | null;
   parent_id: string;
   parent_name: string;
   parent_email: string;
@@ -402,6 +411,7 @@ export function enrollmentRows(
   return tx<EnrollmentRow[]>`
     select e.id as enrollment_id, e.status, e.refund_owed, e.refund_status,
            ch.id as child_id, ch.first_name || ' ' || ch.last_name as child_name,
+           ch.grade, ch.photo_path, ch.in_afterschool_care, ch.afterschool_care_program,
            p.id as parent_id, p.full_name as parent_name, p.email as parent_email,
            c.id as class_offering_id, c.title, sc.name as school, sc.timezone,
            c.weekday, c.start_time, oi.unit_price_cents as price_cents,

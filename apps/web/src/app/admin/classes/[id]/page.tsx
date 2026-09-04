@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatMoney } from "@keiki/core/stripe";
+import { signPhotos } from "@/lib/photos";
+import { ChildPhoto } from "../../child-photo";
 import { isUuid } from "@keiki/core/uuid";
 import {
   readAsStaff,
@@ -39,6 +41,10 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
 
   const c = data.cls;
   const active = data.roster.filter((r) => r.status !== "cancelled");
+
+  // Signed once for the whole roster. Eighteen children would otherwise be
+  // eighteen round trips before the page renders.
+  const photos = await signPhotos(data.roster.map((r) => r.photo_path));
   const reconciles = c.enrolled + c.held === c.seats_taken;
   const pct = Math.round((c.seats_taken / c.capacity) * 100);
   const collected = data.payments
@@ -129,6 +135,7 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
               <thead>
                 <tr>
                   <th>Child</th>
+                  <th>Grade</th>
                   <th>Family</th>
                   <th className="ops-num">Paid</th>
                   <th>Status</th>
@@ -138,7 +145,28 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
               <tbody>
                 {data.roster.map((r) => (
                   <tr key={r.enrollment_id}>
-                    <td className="font-medium">{r.child_name}</td>
+                    <td>
+                      <span className="flex items-center gap-2.5">
+                        <ChildPhoto
+                          name={r.child_name}
+                          url={r.photo_path ? photos.get(r.photo_path) : null}
+                        />
+                        <span>
+                          <span className="font-medium">{r.child_name}</span>
+                          {r.in_afterschool_care && (
+                            // Decides where the child is handed back at the end
+                            // of a session, so it belongs on the roster rather
+                            // than three clicks away.
+                            <span className="ops-pill ops-pill-info ml-2">
+                              {r.afterschool_care_program ?? "after school care"}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td>
+                      {r.grade === null ? "" : r.grade === 0 ? "K" : `Grade ${r.grade}`}
+                    </td>
                     <td>
                       <Link
                         href={`/admin/families/${r.parent_id}`}

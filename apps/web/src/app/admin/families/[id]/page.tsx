@@ -14,6 +14,8 @@ import {
 import { EmptyState, Icon, Pill, Stat, initials, refundTone, tintFor, when } from "../../ui";
 import { AddNote } from "./add-note";
 import { ResendNotification } from "./resend";
+import { signPhotos } from "@/lib/photos";
+import { ChildPhoto } from "../../child-photo";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +43,10 @@ export default async function Family({ params }: { params: Promise<{ id: string 
   }));
 
   if (!data.family) notFound();
+
+  // Signed for the whole family at once. The bucket is private, so a photo has
+  // no URL until one is minted, and it stops working ten minutes later.
+  const photos = await signPhotos(data.children.map((c) => c.photo_path));
 
   const f = data.family;
   const paid = data.payments
@@ -110,11 +116,24 @@ export default async function Family({ params }: { params: Promise<{ id: string 
               <div>
                 {data.children.map((c) => (
                   <div key={c.child_id} className="ops-row">
+                    <ChildPhoto
+                      name={`${c.first_name} ${c.last_name}`}
+                      url={c.photo_path ? photos.get(c.photo_path) : null}
+                      size={40}
+                    />
                     <div className="min-w-0">
                       <p className="font-medium">
                         {c.first_name} {c.last_name}
+                        {c.in_afterschool_care && (
+                          <span className="ops-pill ops-pill-info ml-2">
+                            {c.afterschool_care_program ?? "after school care"}
+                          </span>
+                        )}
                       </p>
                       <p className="ops-mono">
+                        {c.grade === null
+                          ? ""
+                          : `${c.grade === 0 ? "Kindergarten" : `Grade ${c.grade}`} · `}
                         born {c.date_of_birth} · {c.enrollments} active
                       </p>
                       {/* Allergies and medical notes. The reason this system is

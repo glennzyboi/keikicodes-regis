@@ -94,6 +94,7 @@ export type RegistrationResult =
   | { ok: false; reason: "schedule_conflict"; detail: string }
   | { ok: false; reason: "grade_not_eligible"; detail: string }
   | { ok: false; reason: "registered_elsewhere"; detail: string }
+  | { ok: false; reason: "photo_not_yours"; detail: string }
   | { ok: false; reason: "class_not_available" };
 
 type OfferingRow = {
@@ -205,7 +206,16 @@ export async function createPendingOrder(
       for (const r of input.registrations) {
         const path = r.child.photoPath;
         if (path && !path.startsWith(`${parent.id}/`)) {
-          return { ok: false as const, reason: "class_not_available" as const };
+          // Its own reason rather than the generic one. A refusal that names
+          // the wrong cause costs somebody an hour: this fired once during a
+          // manual run and reported that the class was unavailable, which sent
+          // the investigation straight at the catalogue.
+          return {
+            ok: false as const,
+            reason: "photo_not_yours" as const,
+            detail:
+              "That photograph is not one you uploaded. Choose the photo again and resubmit.",
+          };
         }
       }
 

@@ -654,6 +654,77 @@ test.describe("what a registration records", () => {
     expect(confirmed).toBe(true);
   });
 
+  test("staff can actually see the photograph, through a signed URL", async ({
+    page,
+    request,
+  }) => {
+    // A required field nobody can look at is theatre. The bucket is private, so
+    // there is no URL to put in an img tag: the page mints a short lived signed
+    // one on the server for a staff member who is already authorised.
+    //
+    // Built here rather than borrowed, because the seed empties families and a
+    // test that skips when it finds nothing is a test that never runs.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+    const [parent] = await sql<{ id: string }[]>`
+      insert into parents (email, full_name)
+      values (${`${unique("shot")}@example.test`}, 'Head Shot Family')
+      returning id`;
+
+    const key = `${parent.id}/probe.jpg`;
+    // The smallest thing a browser will decode as an image.
+    const jpeg = Buffer.from(
+      "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==",
+      "base64",
+    );
+
+    try {
+      const put = await request.post(`${url}/storage/v1/object/child-photos/${key}`, {
+        headers: {
+          apikey: service,
+          Authorization: `Bearer ${service}`,
+          "content-type": "image/jpeg",
+        },
+        data: jpeg,
+      });
+      expect(put.ok(), await put.text()).toBeTruthy();
+
+      await sql`
+        insert into children (parent_id, first_name, last_name, date_of_birth, grade, photo_path)
+        values (${parent.id}, 'Shot', 'Probe', '2016-01-01', 3, ${key})`;
+
+      await signInStaff(page);
+      await page.goto(`/admin/families/${parent.id}`);
+
+      const avatar = page.locator("img.ops-avatar").first();
+      await expect(avatar).toBeVisible();
+
+      // Signed, not public: a bare object path would mean the bucket was open.
+      const src = await avatar.getAttribute("src");
+      expect(src).toContain("token=");
+      expect(src).not.toContain("/object/public/");
+
+      // And it actually loads, rather than being a broken image with a nice URL.
+      await expect
+        .poll(
+          () =>
+            avatar.evaluate(
+              (el) =>
+                (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0,
+            ),
+          { message: "the signed URL resolves to a real image", timeout: 10_000 },
+        )
+        .toBe(true);
+    } finally {
+      await request.delete(`${url}/storage/v1/object/child-photos/${key}`, {
+        headers: { apikey: service, Authorization: `Bearer ${service}` },
+      });
+      await sql`delete from children where parent_id = ${parent.id}`;
+      await sql`delete from parents where id = ${parent.id}`;
+    }
+  });
+
   test("a registration without consent is refused", async ({ page }) => {
     const cls = await freeClass(1);
     await signUpParent(page, `${unique("noconsent")}@example.test`, "No Consent");

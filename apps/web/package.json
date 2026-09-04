@@ -20,6 +20,7 @@
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
     "stripe": "^22.6.1",
     "zod": "^4.5.4"
   },

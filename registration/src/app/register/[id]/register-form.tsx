@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Other = { id: string; title: string; school: string; price_cents: number; left: number };
 type Child = { firstName: string; lastName: string; dateOfBirth: string; notes: string };
@@ -26,16 +27,14 @@ export default function RegisterForm({
   const [extraClasses, setExtraClasses] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   /**
    * Minted once, when the form mounts. It travels with the submission, so a
    * double click, a slow network retry, or the parent hitting back and
    * submitting again all arrive carrying the same key and resolve to one order.
    */
-  const idempotencyKey = useMemo(
-    () => (typeof crypto !== "undefined" ? crypto.randomUUID() : String(Date.now())),
-    [],
-  );
+  const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
 
   const selectedClasses = [classId, ...extraClasses];
   const perChild =
@@ -89,9 +88,10 @@ export default function RegisterForm({
       }
 
       if (data.alreadyPaid) {
-        window.location.href = `/confirming?order=${data.orderId}`;
+        router.push(`/confirming?order=${data.orderId}`);
         return;
       }
+      // Stripe is another origin, so this one really is a location assignment.
       window.location.href = data.checkoutUrl;
     } catch {
       setError("Could not reach the server. Nothing was charged.");

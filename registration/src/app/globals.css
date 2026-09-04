@@ -180,6 +180,21 @@ h1, h2, h3, h4, .font-display {
   margin-bottom: 0.4rem;
 }
 
+/* ---------------------------------------------------------------- alerts */
+/*
+  Their palette has no red in it. Rather than import one, warnings borrow the
+  brand yellow and lean on the border to carry the weight, which keeps a failed
+  sign in from looking like a different product.
+*/
+.kc-alert {
+  border: 1px solid var(--color-sun-deep);
+  background: color-mix(in oklab, var(--color-sun) 18%, white);
+  color: var(--color-green-900);
+  border-radius: var(--radius-field);
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+}
+
 /* ---------------------------------------------------------------- entrance */
 /*
   Transitions rather than keyframes, so a re-render mid-animation retargets

@@ -15,11 +15,15 @@ import Link from "next/link";
 function Confirming() {
   const params = useSearchParams();
   const orderId = params.get("order");
-  const [state, setState] = useState<"waiting" | "done" | "slow" | "error">("waiting");
+  // Derived from the URL at first render rather than set from inside the
+  // effect: a missing order id is knowable immediately, not an event.
+  const [state, setState] = useState<"waiting" | "done" | "slow" | "error">(
+    orderId ? "waiting" : "error",
+  );
   const [portalToken, setPortalToken] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!orderId) return setState("error");
+    if (!orderId) return;
 
     let attempts = 0;
     let cancelled = false;

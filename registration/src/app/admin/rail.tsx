@@ -36,28 +36,19 @@ export function Rail({
 }) {
   const pathname = usePathname();
 
+  // Payments, cancellations and refunds used to be three entries. They are one
+  // job, the state of the money, so they are one destination with sub tabs. The
+  // badge is the total of everything unresolved across all three.
+  const moneyOpen = counts.unconfirmed + counts.cancellations + counts.refunds;
+
   const today: Item[] = [
     { href: "/admin", label: "Overview", icon: "grid" },
     {
-      href: "/admin/payments",
-      label: "Payments",
-      icon: "card",
-      count: counts.unconfirmed,
-      tone: "danger",
-    },
-    {
-      href: "/admin/cancellations",
-      label: "Cancellations",
-      icon: "undo",
-      count: counts.cancellations,
-      tone: "warn",
-    },
-    {
-      href: "/admin/refunds",
-      label: "Refunds",
+      href: "/admin/money",
+      label: "Money",
       icon: "cash",
-      count: counts.refunds,
-      tone: "warn",
+      count: moneyOpen,
+      tone: counts.unconfirmed > 0 ? "danger" : "warn",
     },
   ];
 

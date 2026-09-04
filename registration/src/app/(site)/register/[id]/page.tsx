@@ -49,13 +49,29 @@ export default async function RegisterPage({
 
   // Other classes the same parent might add in one submission, which is how the
   // "two kids, or two classes, one payment" path gets exercised.
+  //
+  // classes_clash is evaluated here rather than in the browser, so a class that
+  // cannot be combined with this one arrives already marked. The server rejects
+  // it too; this just means the parent never gets far enough to be rejected.
   const others = await sql<
-    { id: string; title: string; school: string; price_cents: number; left: number }[]
+    {
+      id: string;
+      title: string;
+      school: string;
+      price_cents: number;
+      left: number;
+      weekday: number;
+      start_time: string;
+      end_time: string;
+      clashes: boolean;
+    }[]
   >`select c.id, c.title, s.name as school, c.price_cents,
-           (c.capacity - c.seats_taken) as left
+           (c.capacity - c.seats_taken) as left,
+           c.weekday, c.start_time, c.end_time,
+           classes_clash(c.id, ${id}) as clashes
       from class_offerings c join schools s on s.id = c.school_id
      where c.status = 'published' and c.id <> ${id} and c.seats_taken < c.capacity
-     order by s.name limit 5`;
+     order by clashes asc, s.name limit 6`;
 
   const seatsLeft = cls.capacity - cls.seats_taken;
 

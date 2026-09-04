@@ -1,0 +1,242 @@
+/* =====================================================================
+   Calendar
+
+   Shared by both sides of the app, so it styles itself from variables the
+   host sets rather than from either design system. The office console
+   supplies neutral values; the parent site supplies brand ones.
+
+   Defaults below are the neutral set, so an unstyled host still looks
+   deliberate rather than broken.
+   ===================================================================== */
+:root {
+  --cal-line: #e4e7ec;
+  --cal-line-soft: #eff1f4;
+  --cal-surface: #ffffff;
+  --cal-text: #101828;
+  --cal-muted: #667085;
+  --cal-faint: #98a2b3;
+  --cal-accent: #2563eb;
+  --cal-accent-soft: #eaf1fe;
+  --cal-today: #fdf4e3;
+  --cal-radius: 10px;
+  --cal-ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.cal-month {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.cal-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--cal-line);
+  border-radius: 8px;
+  background: var(--cal-surface);
+  color: var(--cal-text);
+  font: inherit;
+  font-size: 12.5px;
+  transition: transform 130ms var(--cal-ease), background-color 130ms ease;
+}
+.cal-nav:active {
+  transform: scale(0.95);
+}
+@media (hover: hover) {
+  .cal-nav:hover {
+    background: var(--cal-line-soft);
+  }
+}
+.cal-nav-wide {
+  padding: 0 12px;
+}
+
+/* ------------------------------------------------------------ month grid */
+/*
+  Hidden on small screens. Seven columns on a phone gives each day about
+  forty pixels, which is not a calendar, it is a colour swatch. The agenda
+  below takes over instead.
+*/
+.cal-grid-wrap {
+  display: none;
+}
+@media (min-width: 640px) {
+  .cal-grid-wrap {
+    display: block;
+  }
+}
+
+.cal-head {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--cal-line);
+  border-bottom: 0;
+  border-radius: var(--cal-radius) var(--cal-radius) 0 0;
+  overflow: hidden;
+}
+.cal-head-cell {
+  padding: 7px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cal-faint);
+  background: var(--cal-line-soft);
+  text-align: center;
+}
+/* "M" alone is ambiguous; show the rest of the name once there is room. */
+.cal-head-long {
+  display: none;
+}
+@media (min-width: 860px) {
+  .cal-head-long {
+    display: inline;
+  }
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--cal-line);
+  border-radius: 0 0 var(--cal-radius) var(--cal-radius);
+  overflow: hidden;
+  background: var(--cal-line);
+  gap: 1px;
+}
+
+.cal-cell {
+  position: relative;
+  min-height: 92px;
+  padding: 6px;
+  background: var(--cal-surface);
+}
+.cal-cell[data-outside="true"] {
+  background: var(--cal-line-soft);
+}
+.cal-cell[data-today="true"] {
+  background: var(--cal-today);
+}
+
+.cal-daynum {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cal-muted);
+  margin-bottom: 4px;
+}
+.cal-cell[data-today="true"] .cal-daynum {
+  color: var(--cal-text);
+}
+
+.cal-events {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ---------------------------------------------------------------- events */
+.cal-event {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border-left: 3px solid var(--cal-accent);
+  background: var(--cal-accent-soft);
+  color: var(--cal-text);
+  font-size: 11.5px;
+  line-height: 1.3;
+  text-decoration: none;
+  transition: transform 120ms var(--cal-ease), filter 120ms ease;
+}
+a.cal-event:active {
+  transform: scale(0.98);
+}
+@media (hover: hover) {
+  a.cal-event:hover {
+    filter: brightness(0.97);
+  }
+}
+
+.cal-event-time {
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--cal-muted);
+}
+.cal-event-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-event-sub {
+  color: var(--cal-muted);
+  font-size: 11px;
+}
+
+.cal-event[data-tone="cancelled"] {
+  border-left-color: #b42318;
+  background: #fdecea;
+}
+.cal-event[data-tone="cancelled"] .cal-event-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.cal-event[data-tone="moved"] {
+  border-left-color: #98a2b3;
+  background: var(--cal-line-soft);
+}
+.cal-event[data-tone="muted"] {
+  border-left-color: var(--cal-faint);
+  background: var(--cal-line-soft);
+  color: var(--cal-muted);
+}
+
+/* --------------------------------------------------------------- agenda */
+.cal-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (min-width: 640px) {
+  .cal-agenda {
+    display: none;
+  }
+}
+
+.cal-agenda-date {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cal-muted);
+  margin-bottom: 6px;
+}
+.cal-agenda-events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cal-agenda .cal-event {
+  padding: 9px 11px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+.cal-agenda .cal-event-title {
+  white-space: normal;
+}
+
+.cal-empty {
+  padding: 22px 4px;
+  color: var(--cal-muted);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-nav:active,
+  a.cal-event:active {
+    transform: none;
+  }
+}

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Shared components. Host-agnostic, styled from variables each side sets. */
+@import "../components/calendar.css";
+@import "../components/expandable.css";
+@import "../components/date-field.css";
+
 /*
   Keiki Coders brand, taken from their live site rather than invented.
   Source: static1.squarespace.com/static/custom-css/6523a780f28838549671e2dc/.../custom.css
@@ -356,4 +361,38 @@ h1, h2, h3, h4, .font-display {
 @media (prefers-reduced-motion: reduce) {
   .kc-program:hover { transform: none; }
   .kc-seats > span { transition: none; }
+}
+
+/* ------------------------------------------------- shared components, brand */
+/*
+  The calendar and the disclosure widgets are host agnostic. On the parent side
+  they take their colours from the brand tokens; the office console maps them to
+  its neutral palette instead.
+*/
+.kc-site {
+  --cal-line: var(--color-hairline);
+  --cal-line-soft: var(--color-mist);
+  --cal-surface: var(--color-paper);
+  --cal-text: var(--color-ink);
+  --cal-muted: var(--color-ink-soft);
+  --cal-faint: var(--color-ink-soft);
+  --cal-accent: var(--color-green-700);
+  --cal-accent-soft: var(--color-green-100);
+  --cal-today: color-mix(in oklab, var(--color-sun) 22%, white);
+  --cal-radius: 18px;
+
+  --exp-line: var(--color-hairline);
+  --exp-line-soft: var(--color-mist);
+  --exp-surface: var(--color-paper);
+  --exp-hover: var(--color-mist);
+  --exp-text: var(--color-ink);
+  --exp-muted: var(--color-ink-soft);
+  --exp-faint: var(--color-ink-soft);
+  --exp-radius: var(--radius-card);
+}
+
+/* A selected state for the quiet button, used by the portal filters. */
+.kc-btn[data-chosen="true"] {
+  background: var(--color-green-700);
+  color: #fff;
 }

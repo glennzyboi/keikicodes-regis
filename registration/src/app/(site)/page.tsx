@@ -1,34 +1,43 @@
 import Link from "next/link";
 import { sql } from "@/lib/db";
-import { formatMoney } from "@/lib/stripe";
-import { artFor, ProgramMark } from "./program-art";
+import { artFor } from "./program-art";
+import { ClassCard, type PublicClass } from "./class-card";
 
 export const dynamic = "force-dynamic";
 
-const DAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
-const SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function timeLabel(t: string) {
-  const [h, m] = t.split(":").map(Number);
-  const suffix = h >= 12 ? "pm" : "am";
-  const hour = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${hour}${suffix}` : `${hour}:${String(m).padStart(2, "0")}${suffix}`;
-}
-
-/** "Ages 6 to 9" out of the summary, so the card can show it as a chip. */
-function ageChip(summary: string | null) {
-  const match = summary?.match(/Ages? ([\d]+)(?:\s*(?:to|and up|\+|-)\s*([\d]+)?)?/i);
-  if (!match) return null;
-  return match[2] ? `Ages ${match[1]} to ${match[2]}` : `Ages ${match[1]}+`;
-}
-
-function startLabel(date: string) {
-  const [y, m, d] = String(date).slice(0, 10).split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(y, m - 1, d)));
+/** Database row to the shape the card wants. Keeps SQL naming out of the UI. */
+function toPublic(c: {
+  id: string;
+  title: string;
+  summary: string;
+  school: string;
+  timezone: string;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  weeks: number;
+  capacity: number;
+  seats_taken: number;
+  price_cents: number;
+  first_session_date: string;
+  last_session: Date | null;
+}): PublicClass {
+  return {
+    id: c.id,
+    title: c.title,
+    summary: c.summary,
+    school: c.school,
+    timezone: c.timezone,
+    weekday: c.weekday,
+    startTime: c.start_time,
+    endTime: c.end_time,
+    weeks: c.weeks,
+    capacity: c.capacity,
+    seatsTaken: c.seats_taken,
+    priceCents: c.price_cents,
+    firstSession: String(c.first_session_date).slice(0, 10),
+    lastSession: c.last_session ? new Date(c.last_session).toISOString().slice(0, 10) : null,
+  };
 }
 
 export default async function Home() {
@@ -46,10 +55,14 @@ export default async function Home() {
       seats_taken: number;
       price_cents: number;
       first_session_date: string;
+      timezone: string;
+      last_session: Date | null;
     }[]
-  >`select c.id, c.title, c.summary, s.name as school, c.weekday, c.start_time,
-           c.end_time, c.weeks, c.capacity, c.seats_taken, c.price_cents,
-           c.first_session_date
+  >`select c.id, c.title, c.summary, s.name as school, s.timezone, c.weekday,
+           c.start_time, c.end_time, c.weeks, c.capacity, c.seats_taken,
+           c.price_cents, c.first_session_date,
+           (select max(ses.starts_at) from sessions ses
+             where ses.class_offering_id = c.id and ses.status <> 'cancelled') as last_session
       from class_offerings c
       join schools s on s.id = c.school_id
      where c.status = 'published'
@@ -128,110 +141,10 @@ export default async function Home() {
           </p>
         </div>
 
-        <div className="kc-stagger mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {classes.map((c) => {
-            const art = artFor(c.title);
-            const left = c.capacity - c.seats_taken;
-            const full = left <= 0;
-            const low = !full && left <= 3;
-            const filled = Math.round((c.seats_taken / c.capacity) * 100);
-            const age = ageChip(c.summary);
-
-            return (
-              <article
-                key={c.id}
-                className="kc-program kc-enter flex flex-col"
-                style={
-                  {
-                    "--kc-accent": art.accent,
-                    "--kc-soft": art.soft,
-                    "--kc-ink": art.ink,
-                  } as React.CSSProperties
-                }
-              >
-                <div className="kc-program-band" />
-
-                <div className="flex flex-1 flex-col p-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="kc-program-mark">
-                      <ProgramMark title={c.title} />
-                    </div>
-                    <span className="kc-chip kc-chip-accent">{art.tag}</span>
-                  </div>
-
-                  <p className="mt-4 font-display text-xs font-semibold uppercase tracking-wider text-green-600">
-                    {c.school}
-                  </p>
-                  <h3 className="mt-1 font-display text-2xl font-bold text-green-900">
-                    {c.title}
-                  </h3>
-                  <p className="mt-2 flex-1 text-sm leading-relaxed text-ink-soft">
-                    {c.summary}
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {age && <span className="kc-chip">{age}</span>}
-                    <span className="kc-chip">
-                      {SHORT[c.weekday]} {timeLabel(c.start_time)}
-                    </span>
-                    <span className="kc-chip">{c.weeks} weeks</span>
-                    <span className="kc-chip">Starts {startLabel(c.first_session_date)}</span>
-                  </div>
-
-                  <div className="mt-5">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span
-                        className={`font-display text-sm font-semibold ${
-                          full ? "text-ink-soft" : low ? "text-sun-deep" : "text-green-600"
-                        }`}
-                      >
-                        {full
-                          ? "Class is full"
-                          : left === 1
-                            ? "1 seat left"
-                            : `${left} seats left`}
-                      </span>
-                      <span className="text-xs text-ink-soft">
-                        {c.seats_taken} of {c.capacity} taken
-                      </span>
-                    </div>
-                    <div
-                      className="kc-seats mt-2"
-                      data-low={low}
-                      role="img"
-                      aria-label={`${filled}% full`}
-                    >
-                      <span style={{ width: `${Math.min(filled, 100)}%` }} />
-                    </div>
-                  </div>
-
-                  <div className="mt-5 flex items-center justify-between gap-3 border-t border-hairline pt-4">
-                    <div>
-                      <p className="font-display text-2xl font-bold text-green-900">
-                        {formatMoney(c.price_cents)}
-                      </p>
-                      <p className="text-xs text-ink-soft">
-                        {DAYS[c.weekday]} {timeLabel(c.start_time)} to{" "}
-                        {timeLabel(c.end_time)}
-                      </p>
-                    </div>
-                    {full ? (
-                      <button className="kc-btn kc-btn-quiet text-sm" disabled>
-                        Full
-                      </button>
-                    ) : (
-                      <Link
-                        href={`/register/${c.id}`}
-                        className="kc-btn kc-btn-primary text-sm"
-                      >
-                        Register
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              </article>
-            );
-          })}
+        <div className="kc-stagger mt-10 grid items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {classes.map((c) => (
+            <ClassCard key={c.id} cls={toPublic(c)} />
+          ))}
         </div>
       </section>
 

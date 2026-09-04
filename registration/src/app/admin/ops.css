@@ -36,6 +36,26 @@
 
   --ops-ease: cubic-bezier(0.23, 1, 0.32, 1);
 
+  /* The shared calendar and disclosure components read these. */
+  --cal-line: var(--ops-line);
+  --cal-line-soft: var(--ops-line-soft);
+  --cal-surface: var(--ops-surface);
+  --cal-text: var(--ops-text);
+  --cal-muted: var(--ops-muted);
+  --cal-faint: var(--ops-faint);
+  --cal-accent: var(--ops-accent);
+  --cal-accent-soft: var(--ops-accent-soft);
+  --cal-today: var(--ops-warn-soft);
+
+  --exp-line: var(--ops-line);
+  --exp-line-soft: var(--ops-line-soft);
+  --exp-surface: var(--ops-surface);
+  --exp-hover: #fbfcfd;
+  --exp-text: var(--ops-text);
+  --exp-muted: var(--ops-muted);
+  --exp-faint: var(--ops-faint);
+  --exp-radius: 12px;
+
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.45;

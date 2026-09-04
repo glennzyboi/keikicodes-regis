@@ -28,6 +28,18 @@ async function signUp(page: Page, email: string, name = "Test Parent") {
 }
 
 /**
+ * The date field is three selects rather than one input, because a native date
+ * picker makes entering a birthday ten years back into a paging exercise.
+ */
+async function fillDate(page: Page, index: number, iso: string) {
+  const [year, month, day] = iso.split("-");
+  const block = page.locator(".df-parts").nth(index);
+  await block.locator("select").nth(0).selectOption(month);
+  await block.locator("select").nth(1).selectOption(day);
+  await block.locator("select").nth(2).selectOption(year);
+}
+
+/**
  * Stripe's hosted checkout, paid with the standard test card.
  *
  * The hosted page presents payment methods as an accordion with nothing
@@ -84,19 +96,22 @@ test("a parent registers two children, pays, and the webhook confirms it", async
   await expect(page.getByRole("heading", { name: /register your keiki/i })).toBeVisible();
 
   // Register into the class the brief describes: Tuesdays 3 to 4pm, 12 seats.
-  const card = page.locator("article", { hasText: "Scratch Adventures" });
-  await card.getByRole("link", { name: "Register" }).click();
+  // The card opens to reveal the full detail and the register link, so the
+  // spec goes through the same disclosure a parent does.
+  const card = page.locator(".exp-card", { hasText: "Scratch Adventures" }).first();
+  await card.locator(".exp-card-summary").click();
+  await card.getByRole("link", { name: /Register for/ }).click();
   await expect(page.getByRole("heading", { name: "Scratch Adventures" })).toBeVisible();
 
   await page.getByLabel("First name").fill("Noa");
   await page.getByLabel("Last name").fill(lastName);
-  await page.getByLabel("Date of birth").fill("2017-04-02");
+  await fillDate(page, 0, "2017-04-02");
 
   // Second child in the same submission: one order, two seats, one payment.
   await page.getByRole("button", { name: "Add another child" }).click();
   await page.locator("#fn-1").fill("Leo");
   await page.locator("#ln-1").fill(lastName);
-  await page.locator("#dob-1").fill("2019-08-11");
+  await fillDate(page, 1, "2019-08-11");
 
   const before = await sql<{ seats_taken: number }[]>`
     select seats_taken from class_offerings where title = 'Scratch Adventures'`;

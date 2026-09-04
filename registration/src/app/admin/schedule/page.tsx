@@ -1,102 +1,70 @@
-import Link from "next/link";
 import { readAsStaff, sessionRows } from "../queries";
 import { EmptyState, PageHead, Pill } from "../ui";
+import { Calendar, type CalendarEvent } from "@/components/calendar";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Everything happening next, across every campus.
+ * Every session, as a month calendar.
  *
- * Grouped by day rather than listed flat, because the question is almost always
- * "what is on this week" and never "show me session 7 of everything". Cancelled
- * and moved dates stay visible, since a date that used to exist is exactly what
- * someone is ringing about.
+ * A list answered "what is next" and nothing else. A calendar answers the
+ * question staff actually have, which is what a week looks like, where the gaps
+ * are, and whether cancelling Tuesday leaves the campus empty.
+ *
+ * Cancelled and moved dates stay on the grid, struck through rather than
+ * removed. A date that used to exist is exactly what someone is ringing about,
+ * and a calendar that quietly forgets it cannot answer them.
  */
 export default async function Schedule() {
-  const { data: sessions } = await readAsStaff((tx) => sessionRows(tx, { upcomingOnly: true }));
+  const { data: sessions } = await readAsStaff((tx) => sessionRows(tx, {}));
 
-  type Row = (typeof sessions)[number];
-  const byDay = new Map<string, Row[]>();
-  for (const s of sessions) {
-    const key = new Intl.DateTimeFormat("en-CA", {
-      timeZone: s.timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(s.starts_at));
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key)!.push(s);
-  }
+  const events: CalendarEvent[] = sessions.map((s) => ({
+    id: s.session_id,
+    startsAt: new Date(s.starts_at).toISOString(),
+    endsAt: new Date(s.ends_at).toISOString(),
+    title: s.title,
+    subtitle: `${s.school} · ${s.enrolled} enrolled${s.note ? ` · ${s.note}` : ""}`,
+    timezone: s.timezone,
+    tone:
+      s.status === "cancelled" ? "cancelled" : s.status === "rescheduled" ? "moved" : "default",
+    href: `/admin/classes/${s.class_offering_id}`,
+  }));
+
+  // Today in Honolulu, computed on the server so the first render matches the
+  // client and there is no hydration mismatch on the highlighted cell.
+  const todayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Pacific/Honolulu",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+  const cancelled = sessions.filter((s) => s.status === "cancelled").length;
+  const moved = sessions.filter((s) => s.status === "rescheduled").length;
+  const upcoming = sessions.filter(
+    (s) => s.status === "scheduled" && new Date(s.starts_at) >= new Date(),
+  ).length;
 
   return (
     <div className="space-y-4">
       <PageHead
         title="Schedule"
-        note="Every session from today onwards, in each campus's own timezone. Cancelled and moved dates stay on the list, because those are the ones parents ring about."
+        note="Every session across every campus, in each campus's own timezone. Cancelled and moved dates stay on the calendar, because those are the ones parents ring about."
       />
 
-      {sessions.length === 0 ? (
-        <section className="ops-panel ops-enter">
-          <EmptyState icon="calendar" title="Nothing scheduled" note="No upcoming sessions." />
-        </section>
-      ) : (
-        <div className="space-y-4">
-          {[...byDay.entries()].map(([day, rows]) => (
-            <section key={day} className="ops-panel ops-enter">
-              <div className="ops-panel-head">
-                <div>
-                  <h2 className="text-[15px] font-semibold">{dayLabel(day)}</h2>
-                  <p className="mt-0.5 text-[var(--ops-muted)]">
-                    {rows.length} session{rows.length === 1 ? "" : "s"}
-                  </p>
-                </div>
-              </div>
-              <div>
-                {rows.map((s) => (
-                  <div key={s.session_id} className="ops-row">
-                    <div className="min-w-0">
-                      <Link
-                        href={`/admin/classes/${s.class_offering_id}`}
-                        className="font-medium underline decoration-transparent underline-offset-2 hover:decoration-inherit"
-                      >
-                        {s.title}
-                      </Link>
-                      <p className="ops-mono">
-                        {s.school} · session {s.seq} · {s.enrolled} enrolled
-                      </p>
-                      {s.note && (
-                        <p className="mt-1 text-[var(--ops-muted)]">{s.note}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="ops-mono">
-                        {new Intl.DateTimeFormat("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                          timeZone: s.timezone,
-                        }).format(new Date(s.starts_at))}
-                      </span>
-                      {s.status === "scheduled" && <Pill tone="good">on</Pill>}
-                      {s.status === "cancelled" && <Pill tone="danger">cancelled</Pill>}
-                      {s.status === "rescheduled" && <Pill tone="quiet">moved</Pill>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        <Pill tone="good">{upcoming} still to run</Pill>
+        {cancelled > 0 && <Pill tone="danger">{cancelled} cancelled</Pill>}
+        {moved > 0 && <Pill tone="quiet">{moved} moved</Pill>}
+      </div>
+
+      <section className="ops-panel ops-enter p-4">
+        {sessions.length === 0 ? (
+          <EmptyState icon="calendar" title="Nothing scheduled" note="No sessions exist yet." />
+        ) : (
+          <Calendar events={events} todayKey={todayKey} emptyLabel="No classes" />
+        )}
+      </section>
     </div>
   );
-}
-
-function dayLabel(iso: string) {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(y, m - 1, d)));
 }

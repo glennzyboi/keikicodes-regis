@@ -1,0 +1,192 @@
+/* =====================================================================
+   Expandable rows and cards
+
+   Host-agnostic, like the calendar. Colours come from variables the host
+   sets, with a neutral default so it never renders unstyled.
+   ===================================================================== */
+:root {
+  --exp-line: #e4e7ec;
+  --exp-line-soft: #eff1f4;
+  --exp-surface: #ffffff;
+  --exp-hover: #fbfcfd;
+  --exp-text: #101828;
+  --exp-muted: #667085;
+  --exp-faint: #98a2b3;
+  --exp-radius: 10px;
+  --exp-ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ------------------------------------------------------------ table rows */
+.exp-summary-cell {
+  padding: 0 !important;
+}
+
+.exp-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.exp-summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .exp-summary:hover {
+    background: var(--exp-hover);
+  }
+}
+
+.exp-summary-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.exp-row[data-open="true"] {
+  background: var(--exp-hover);
+}
+
+.exp-detail-cell {
+  padding: 0 !important;
+  background: var(--exp-line-soft);
+  border-bottom: 1px solid var(--exp-line);
+}
+
+.exp-detail {
+  padding: 14px 16px 16px 42px;
+  /* Entrance via transition, not keyframes, so a fast toggle retargets rather
+     than restarting. Never from scale(0). */
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms var(--exp-ease), transform 200ms var(--exp-ease);
+}
+@starting-style {
+  .exp-detail {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ---------------------------------------------------------------- chevron */
+.exp-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--exp-faint);
+  transition: transform 200ms var(--exp-ease), color 150ms ease;
+}
+.exp-chevron[data-open="true"] {
+  transform: rotate(180deg);
+  color: var(--exp-text);
+}
+
+/* ---------------------------------------------------------------- cards */
+.exp-card {
+  background: var(--exp-surface);
+  border: 1px solid var(--exp-line);
+  border-radius: var(--exp-radius);
+  overflow: hidden;
+  transition: border-color 180ms ease, box-shadow 220ms var(--exp-ease);
+}
+.exp-card[data-open="true"] {
+  border-color: var(--exp-faint);
+}
+
+.exp-card-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.exp-card-summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .exp-card-summary:hover {
+    background: var(--exp-hover);
+  }
+}
+
+.exp-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/*
+  grid-template-rows 0fr to 1fr is the one way to animate to a height nobody
+  measured. The inner element must have overflow hidden and no min-height,
+  which is what min-height: 0 is doing.
+*/
+.exp-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms var(--exp-ease);
+}
+.exp-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.exp-panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.exp-card-detail {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--exp-line-soft);
+  padding-top: 14px;
+  margin-top: 0;
+}
+
+/* ----------------------------------------------------------------- facts */
+.exp-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 20px;
+  margin: 0;
+}
+
+.exp-fact-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--exp-faint);
+}
+.exp-fact-value {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--exp-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exp-panel {
+    transition: none;
+  }
+  .exp-chevron {
+    transition: none;
+  }
+  .exp-detail {
+    transition: none;
+  }
+  @starting-style {
+    .exp-detail {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

@@ -3,14 +3,34 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HOLD_MINUTES } from "@/lib/holds";
+import { DateField } from "@/components/date-field";
 
-type Other = { id: string; title: string; school: string; price_cents: number; left: number };
+type Other = {
+  id: string;
+  title: string;
+  school: string;
+  price_cents: number;
+  left: number;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  clashes: boolean;
+};
 type Child = { firstName: string; lastName: string; dateOfBirth: string; notes: string };
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
 const blankChild = (): Child => ({ firstName: "", lastName: "", dateOfBirth: "", notes: "" });
+
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function clock(t: string) {
+  const [h, m] = t.split(":").map(Number);
+  const suffix = h >= 12 ? "pm" : "am";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${hour}${suffix}` : `${hour}:${String(m).padStart(2, "0")}${suffix}`;
+}
 
 export default function RegisterForm({
   parentName,
@@ -165,12 +185,13 @@ export default function RegisterForm({
                     value={child.lastName}
                     onChange={(e) => setChild(i, { lastName: e.target.value })} />
                 </div>
-                <div>
-                  <label className="kc-label" htmlFor={`dob-${i}`}>Date of birth</label>
-                  <input id={`dob-${i}`} className="kc-field" type="date" required
-                    value={child.dateOfBirth}
-                    onChange={(e) => setChild(i, { dateOfBirth: e.target.value })} />
-                </div>
+                <DateField
+                  label="Date of birth"
+                  required
+                  yearsBack={19}
+                  value={child.dateOfBirth}
+                  onChange={(next) => setChild(i, { dateOfBirth: next })}
+                />
                 <div className="sm:col-span-3">
                   <label className="kc-label" htmlFor={`notes-${i}`}>
                     Allergies or anything we should know (optional)
@@ -187,35 +208,67 @@ export default function RegisterForm({
 
       {others.length > 0 && (
         <section className="kc-card p-7">
-          <h2 className="font-display text-xl font-bold text-green-900">Add another class</h2>
-          <p className="mt-1 text-sm text-ink-soft">
-            Anything you add applies to every child above, and it is all one payment.
-          </p>
-          <div className="mt-4 space-y-2">
-            {others.map((o) => (
-              <label
-                key={o.id}
-                className="flex cursor-pointer items-center gap-3 rounded-[var(--radius-field)] border-2 border-hairline p-3 transition-colors hover:border-green-200"
+          <details className="group">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 list-none">
+              <span>
+                <span className="font-display text-xl font-bold text-green-900">
+                  Add another class
+                </span>
+                <span className="ml-2 kc-chip">Optional</span>
+                <span className="mt-1 block text-sm text-ink-soft">
+                  Most families register for one. Anything you add applies to every child
+                  above, on the same payment.
+                </span>
+              </span>
+              <span
+                aria-hidden
+                className="grid h-8 w-8 flex-none place-items-center rounded-full border border-hairline transition-transform group-open:rotate-180"
               >
-                <input
-                  type="checkbox" className="h-5 w-5 accent-green-700"
-                  checked={extraClasses.includes(o.id)}
-                  onChange={(e) =>
-                    setExtraClasses((v) =>
-                      e.target.checked ? [...v, o.id] : v.filter((x) => x !== o.id),
-                    )
-                  }
-                />
-                <span className="flex-1">
-                  <span className="font-display font-semibold">{o.title}</span>
-                  <span className="text-ink-soft"> &middot; {o.school}</span>
-                </span>
-                <span className="font-display font-semibold text-green-900">
-                  {money(o.price_cents)}
-                </span>
-              </label>
-            ))}
-          </div>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
+            </summary>
+
+            <div className="mt-4 space-y-2">
+              {others.map((o) => {
+                const chosen = extraClasses.includes(o.id);
+                return (
+                  <label
+                    key={o.id}
+                    className={`flex items-center gap-3 rounded-[var(--radius-field)] border-2 p-3 transition-colors ${
+                      o.clashes
+                        ? "cursor-not-allowed border-hairline opacity-55"
+                        : "cursor-pointer border-hairline hover:border-green-200"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 accent-green-700"
+                      checked={chosen}
+                      disabled={o.clashes}
+                      onChange={(e) =>
+                        setExtraClasses((v) =>
+                          e.target.checked ? [...v, o.id] : v.filter((x) => x !== o.id),
+                        )
+                      }
+                    />
+                    <span className="flex-1">
+                      <span className="font-display font-semibold">{o.title}</span>
+                      <span className="text-ink-soft"> &middot; {o.school}</span>
+                      <span className="mt-0.5 block text-xs text-ink-soft">
+                        {DAY_SHORT[o.weekday]} {clock(o.start_time)} to {clock(o.end_time)}
+                        {o.clashes ? " · clashes with this class" : ""}
+                      </span>
+                    </span>
+                    <span className="font-display font-semibold text-green-900">
+                      {money(o.price_cents)}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </details>
         </section>
       )}
 

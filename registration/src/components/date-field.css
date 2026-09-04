@@ -1,0 +1,67 @@
+/* =====================================================================
+   Date field
+
+   Three selects that stack on a narrow screen and sit in a row once there
+   is width. Month is widest because "September" is long; day is narrowest.
+   ===================================================================== */
+.df-parts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+@media (min-width: 420px) {
+  .df-parts {
+    /* Month, day, year. Proportional to the longest content in each. */
+    grid-template-columns: 1.5fr 1fr 1.1fr;
+  }
+}
+
+/*
+  Native selects on iOS ignore height and inherit a 16px minimum before they
+  stop zooming the page on focus. Anything smaller triggers the zoom, which
+  is the single most annoying thing a mobile form can do.
+*/
+.df-parts select {
+  font-size: 16px;
+  min-height: 44px;
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .df-parts select {
+    font-size: 1rem;
+    min-height: 0;
+  }
+}
+
+.df-native {
+  margin-top: 8px;
+}
+.df-native > summary {
+  display: inline-block;
+  font-size: 0.82rem;
+  color: var(--color-ink-soft, #667085);
+  cursor: pointer;
+  list-style: none;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+.df-native > summary::-webkit-details-marker {
+  display: none;
+}
+.df-native input[type="date"] {
+  font-size: 16px;
+  min-height: 44px;
+}
+@media (min-width: 640px) {
+  .df-native input[type="date"] {
+    font-size: 1rem;
+    min-height: 0;
+  }
+}
+
+.df-hint {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--color-ink-soft, #667085);
+}

@@ -22,3 +22,6 @@ questions live one folder up, at `../keiki-build-plan.html`.
 - **`09-their-questions.md`** answers all seven of the questions they said they
   would ask, written against what is actually built and verified. Read it before
   recording the walkthrough.
+
+- **`10-test-it-yourself.md`** the logins, the test card, and nine things to try
+  in order. Start here if you want to drive it by hand.

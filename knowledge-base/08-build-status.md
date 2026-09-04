@@ -162,64 +162,82 @@ registration/tests/         registration.spec.ts
 
 ## WHERE IT STOPPED, AND WHAT TO DO NEXT
 
-**Both Playwright specs now pass, and the payment path has run end to end for
-the first time.** Before this, `webhook_events` had never contained a single row
-and no order had ever reached `paid`.
+**Everything below is built, running and verified against the real Stripe test
+account.** The two Playwright specs pass, the payment path works end to end, and
+refunds go out through the Stripe API.
 
-Two real bugs were found and fixed to get there. Both are worth mentioning on
-camera, because both are the kind of thing the client is actually asking about.
+### What got fixed to get here
 
-**1. Stripe's hosted checkout changed shape.** It now renders payment methods as
-an accordion with nothing selected, so the card fields do not exist in the DOM
-at all until Card is chosen. The old spec typed straight into a card field that
-was never there. The card row is covered by a full-row click overlay that
-reports itself as offscreen, so clicking the row does not work either. What
-works:
+**1. Stripe's hosted checkout changed shape.** Payment methods are now a
+collapsed accordion, so card fields do not exist in the DOM until Card is
+chosen, and the row is covered by a click overlay that reports itself offscreen.
+What works:
 
 ```ts
 await page.getByRole("radio", { name: "Card" }).check({ force: true });
 ```
 
-That mounts `#cardNumber`, `#cardExpiry`, `#cardCvc` and `#billingName` into the
-main frame, no iframe involved. Email is no longer an input at all: it is passed
-as `customer_email` when the session is created and rendered as read-only text.
+Email is no longer an input: it is passed as `customer_email` and rendered as
+read-only text.
 
-**2. A double-clicked submit could 500, and this one was a genuine defect, not a
-test problem.** Two concurrent requests for the same order both reached Stripe
-with idempotency key `checkout:<order id>`, and Stripe rejects concurrent use of
-an in-progress key. The parent saw a 500 despite doing nothing wrong.
+**2. A double-clicked submit could 500.** Two concurrent requests for the same
+order both reached Stripe with idempotency key `checkout:<order id>`, and Stripe
+rejects concurrent use of an in-progress key. Fixed by serialising the checkout
+work per order with `select ... for update`. The database side was already safe:
+the parent upsert takes a row lock that serialises the two transactions.
 
-The database work was already safe: the parent upsert in step 1 of
-`createPendingOrder` takes a row lock on the parent, which serialises the two
-transactions, so the order insert can never collide. The unsafe part was the
-Stripe call, which happens after that transaction commits.
+**3. The sweeper could take a seat back from a parent who had paid.** It deleted
+every expired hold regardless of the order behind it. Holds were also 15 minutes
+against a 30 minute Stripe session, so a parent who took their time lost the seat
+while still holding a live payment page. Both fixed: one shared constant, and
+`release_expired_holds()` now only touches holds whose order is unpaid.
 
-Fixed by serialising the checkout-session work per order with `select ... for
-update` on the order row, in `src/app/api/register/route.ts`. The second request
-blocks, then finds `stripe_checkout_session_id` already set and reuses the same
-session. The lock is one order row, so it never blocks another family.
+**4. Row level security was decorative.** The schema enabled RLS and wrote
+policies but never granted `anon` and `authenticated` any table privileges, and
+every query ran as the database owner, which bypasses RLS entirely. A policy only
+narrows a grant, so with no grant the policies decided nothing. Granted them and
+the policies became load bearing. Proven both ways: as staff the console sees 12
+parents, as anyone else it sees none.
 
-Verified after the fix: order `paid`, `fulfilled_at` set, 2 enrollments, holds
-consumed, seats moved by exactly 2, and the one leftover hold belongs to the
-deliberately unpaid idempotency order.
+**5. formatMoney lived in lib/stripe**, which constructs the Stripe client at
+import time. A shared UI component importing it dragged the server-only module
+into the client bundle and crashed the page. Split into `lib/money.ts`.
 
-**Still to build, in priority order:**
+### What is now built
 
-1. `scripts/sweep-holds.ts`, calling `release_expired_holds()`. The SQL function
-   already exists and works; the script does not exist yet, and `pnpm sweep` in
-   package.json points at it. There is a real expired-hold sitting in the
-   database right now to demonstrate against.
-2. `scripts/thunder.ts`, the 50-against-12 concurrency proof. **The single most
-   valuable remaining item**, because it answers their hardest question on
-   camera. The plan document has the script sketched.
-3. `/portal` page, reading the signed token, listing registrations, request a
-   cancellation. `portal-token.ts` is written and ready.
-4. `/admin`: paid-but-unfulfilled orders, expiring holds, approve a cancellation.
-   Staff login exists and RLS policies are in place.
-5. Session cancel and reschedule, and mid-semester join, in admin.
-6. Record the Loom. Script is in `../keiki-build-plan.html` section 08.
+- **Parent portal** at `/portal`. HMAC signed link, thirty days, no password.
+  Lists registrations, requests a cancellation. The reissue endpoint answers
+  identically whether or not an address is on file.
+- **Refunds, automated.** Approving a cancellation issues the refund through the
+  Stripe API in the same action, keyed on the enrollment id so a retry returns
+  the original refund rather than paying twice. Full, pro rata on sessions still
+  to run, or a typed amount. `refund_owed` only clears when Stripe confirms
+  succeeded, and refund webhooks keep the status honest afterwards.
+  **Verified: a $200 partial refund of a $640 order reached Stripe as
+  `re_3UBsEM...`, came back succeeded, and freed the seat.**
+- **Ops console.** Dark rail, a route per queue: Overview, Payments,
+  Cancellations, Refunds, Seat holds, Classes. Its own design system in
+  `admin/ops.css`, imported by the admin layout and nowhere else. Charts are hand
+  rolled SVG rendered on the server.
+- **Parent site redesigned.** Each program has its own colour, mark and tag,
+  matched on the class title. Cards carry age range, day, length, start date and
+  a fill bar.
+- `scripts/sweep-holds.ts` with `--watch` and `--dry`. Demonstrated releasing an
+  abandoned seat while protecting a paid one.
+- `scripts/thunder.ts`. **50 simultaneous registrations against 10 free seats
+  accepted exactly 10, told 40 the class was full, left the counter at 12/12,
+  zero other failures.**
+- Playwright reseeds in global setup, so a run never inherits the run before it.
 
-Traces and video are kept on failure in `registration/test-results/`.
+### Still to do
+
+1. Record the Loom. Script is in `../keiki-build-plan.html` section 08.
+2. Mid-semester join in the admin. The schema supports it
+   (`starts_from_session_id`) and the seed sets it, but there is no UI to
+   override it.
+3. The topbar search is presentational. It should either be wired up or removed
+   before the walkthrough, because a demo that clicks a dead control is worse
+   than one that never shows it.
 
 ---
 

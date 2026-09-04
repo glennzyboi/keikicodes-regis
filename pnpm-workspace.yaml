@@ -1,0 +1,17 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# esbuild and unrs-resolver ship native binaries and need their install scripts.
+# tsx is esbuild, so without this every script and job silently fails to start.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  sharp: true
+  "@tailwindcss/oxide": true
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - "@tailwindcss/oxide"
+  - unrs-resolver

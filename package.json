@@ -1,0 +1,23 @@
+{
+  "name": "keiki-coders",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.0.8",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm --filter web lint",
+    "seed": "pnpm --filter @keiki/core seed",
+    "import:catalogue": "pnpm --filter @keiki/core import:catalogue",
+    "thunder": "pnpm --filter @keiki/core thunder",
+    "notify": "pnpm --filter api job:notify",
+    "reminders": "pnpm --filter api job:reminders",
+    "sweep": "pnpm --filter api job:sweep",
+    "test": "pnpm --filter web test"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

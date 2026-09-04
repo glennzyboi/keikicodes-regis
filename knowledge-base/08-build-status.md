@@ -110,7 +110,24 @@ Seeding: `./node_modules/.bin/tsx --env-file=.env.local scripts/seed.ts`
 It truncates the operational tables, recreates the catalogue, materialises every
 session, creates Stripe Products and Prices, and creates the staff login.
 
-**Staff login: `ops@keikicoders.test` / `KeikiOps!2026`**
+**Logins, both created by the seed:**
+
+| Role | Email | Password |
+|---|---|---|
+| Staff | `ops@keikicoders.test` | `KeikiOps!2026` |
+| Parent | `parent@keikicoders.test` | `KeikiParent!2026` |
+
+**Background jobs**, all safe to run repeatedly:
+
+```bash
+./node_modules/.bin/tsx --env-file=.env.local scripts/notify.ts          # deliver queued mail
+./node_modules/.bin/tsx --env-file=.env.local scripts/reminders.ts       # queue today's reminders
+./node_modules/.bin/tsx --env-file=.env.local scripts/sweep-holds.ts     # release abandoned seats
+./node_modules/.bin/tsx --env-file=.env.local scripts/thunder.ts         # the 50 against 12 proof
+```
+
+Mail lands in Mailpit at **http://127.0.0.1:55324**, which is worth having open
+during the walkthrough.
 
 Secrets are in `registration/.env.local`, which is gitignored and verified not
 staged. Stripe keys are **test mode only**. Webhook signing secret is currently
@@ -160,108 +177,94 @@ registration/tests/         registration.spec.ts
 
 ---
 
-## WHERE IT STOPPED, AND WHAT TO DO NEXT
+## WHERE IT IS NOW
 
-**Everything below is built, running and verified against the real Stripe test
-account.** The two Playwright specs pass, the payment path works end to end, and
-refunds go out through the Stripe API.
+**Everything below is built, running, and verified against the real Stripe test
+account and a real local inbox.** Four Playwright specs pass.
 
-### What got fixed to get here
+The answers to all seven of their questions are written up in
+`09-their-questions.md`. Read that before recording anything.
 
-**1. Stripe's hosted checkout changed shape.** Payment methods are now a
-collapsed accordion, so card fields do not exist in the DOM until Card is
-chosen, and the row is covered by a click overlay that reports itself offscreen.
-What works:
+### What the system does
 
-```ts
-await page.getByRole("radio", { name: "Card" }).check({ force: true });
-```
+**Parents**
+- Real accounts. Email and password today, Google the moment there are client
+  credentials. **No magic links:** the first cut used an HMAC signed link, and a
+  link that IS the credential is the wrong trade for a system holding children's
+  dates of birth and medical notes.
+- Browse classes, register one or several children in one submission, pay once
+  through Stripe Checkout.
+- Portal shows every registration across terms, and requests a cancellation.
 
-Email is no longer an input: it is passed as `customer_email` and rendered as
-read-only text.
+**Office console at `/admin`**, its own design system, grouped by job:
+- **Today**: Overview with charts and an activity feed, Payments taken but not
+  confirmed, Cancellations to decide, Refunds ledger.
+- **People**: Families with search across parent name, email and children's
+  names. A family page showing keiki, medical notes, registrations, payment
+  history with Stripe links, every message we sent them, and an append only log
+  of phone calls. Students list across all families.
+- **Programs**: Classes with a detail page carrying roster, schedule and the
+  payments for that class. Schedule grouped by day. Seat holds.
+- **Comms**: the outbox, with delivery state, retry and stop.
 
-**2. A double-clicked submit could 500.** Two concurrent requests for the same
-order both reached Stripe with idempotency key `checkout:<order id>`, and Stripe
-rejects concurrent use of an in-progress key. Fixed by serialising the checkout
-work per order with `select ... for update`. The database side was already safe:
-the parent upsert takes a row lock that serialises the two transactions.
+**Automation**
+- A **notifications outbox**. Messages are written in the same transaction as
+  the thing that caused them and delivered by a worker. Nothing sends inline.
+- Triggers: registration confirmed, session cancelled, session rescheduled,
+  cancellation approved, and a day-of class reminder.
+- `dedupe_key` makes enqueueing idempotent. Running the reminder job twice
+  queued 2 then 0.
+- Refunds go to Stripe automatically on approval, keyed on the enrollment id so
+  a retry never pays a family twice.
 
-**3. The sweeper could take a seat back from a parent who had paid.** It deleted
-every expired hold regardless of the order behind it. Holds were also 15 minutes
-against a 30 minute Stripe session, so a parent who took their time lost the seat
-while still holding a live payment page. Both fixed: one shared constant, and
-`release_expired_holds()` now only touches holds whose order is unpaid.
+### Verified, with numbers
 
-**4. Row level security was decorative.** The schema enabled RLS and wrote
-policies but never granted `anon` and `authenticated` any table privileges, and
-every query ran as the database owner, which bypasses RLS entirely. A policy only
-narrows a grant, so with no grant the policies decided nothing. Granted them and
-the policies became load bearing. Proven both ways: as staff the console sees 12
-parents, as anyone else it sees none.
+- **50 simultaneous registrations against 10 free seats**: exactly 10 accepted,
+  40 told the class was full, 0 other failures, counter left at 12/12.
+- **Concurrent double submit**: one order, one seat, one parent.
+- **Full payment path**: register, pay on Stripe, webhook fulfils, seats and
+  holds reconcile, confirmation email queued and delivered.
+- **A $200 partial refund** of a $640 order reached Stripe as `re_3UBsEM...`,
+  came back succeeded through the webhook, and freed the seat.
+- **Row level security both ways**: as staff the console sees every family, as
+  anyone else it sees none.
+- **The sweeper protects paid seats**: an expired hold on a paid order was left
+  alone while an abandoned one was released.
 
-**5. formatMoney lived in lib/stripe**, which constructs the Stripe client at
-import time. A shared UI component importing it dragged the server-only module
-into the client bundle and crashed the page. Split into `lib/money.ts`.
+### Bugs found and fixed along the way
 
-### What is now built
+Worth keeping, because they are the interesting part.
 
-- **Parent portal** at `/portal`. HMAC signed link, thirty days, no password.
-  Lists registrations, requests a cancellation. The reissue endpoint answers
-  identically whether or not an address is on file.
-- **Refunds, automated.** Approving a cancellation issues the refund through the
-  Stripe API in the same action, keyed on the enrollment id so a retry returns
-  the original refund rather than paying twice. Full, pro rata on sessions still
-  to run, or a typed amount. `refund_owed` only clears when Stripe confirms
-  succeeded, and refund webhooks keep the status honest afterwards.
-  **Verified: a $200 partial refund of a $640 order reached Stripe as
-  `re_3UBsEM...`, came back succeeded, and freed the seat.**
-- **Ops console.** Dark rail, a route per queue: Overview, Payments,
-  Cancellations, Refunds, Seat holds, Classes. Its own design system in
-  `admin/ops.css`, imported by the admin layout and nowhere else. Charts are hand
-  rolled SVG rendered on the server.
-- **Parent site redesigned.** Each program has its own colour, mark and tag,
-  matched on the class title. Cards carry age range, day, length, start date and
-  a fill bar.
-- `scripts/sweep-holds.ts` with `--watch` and `--dry`. Demonstrated releasing an
-  abandoned seat while protecting a paid one.
-- `scripts/thunder.ts`. **50 simultaneous registrations against 10 free seats
-  accepted exactly 10, told 40 the class was full, left the counter at 12/12,
-  zero other failures.**
-- Playwright reseeds in global setup, so a run never inherits the run before it.
-
-### The 404 on Register, and why it happened
-
-Worth keeping, because it is the kind of bug that only appears once other
-things are working.
-
-The seed truncated `class_offerings` and inserted fresh rows, so every run
-minted a **new uuid for every class**. Once the Playwright suite started
-reseeding in global setup, running the tests silently invalidated every
-`/register/<id>` link anyone had open: the catalogue in a browser tab pointed at
-classes that no longer existed, and clicking Register gave Next's default
-"This page could not be found".
-
-Fixed three ways:
-
-- A natural key on the catalogue, `(school_id, lower(title), term)`, and the
-  seed upserts against it. Class ids and Stripe price ids now survive a reseed,
-  verified by diffing them across two runs. It also stops the seed creating a
-  duplicate Stripe Product and Price every time it runs.
-- A malformed id used to be a **500**, because Postgres raises on a bad uuid
-  cast. `lib/uuid.ts` guards the register page and the orders API, so a wrong
-  address is a 404.
-- A branded not-found page at `(site)/not-found.tsx`, so a stale link explains
-  itself instead of showing the word 404.
+1. **Stripe checkout changed shape.** Payment methods are now a collapsed
+   accordion, so card fields do not exist until Card is chosen, and the row is
+   covered by an offscreen click overlay. Use
+   `getByRole("radio", { name: "Card" }).check({ force: true })`.
+2. **A double clicked submit could 500.** Both requests called Stripe with the
+   same idempotency key. Fixed with a row lock per order.
+3. **The sweeper could take a seat back from a parent who had paid**, and holds
+   expired at 15 minutes against a 30 minute payment page. One shared constant,
+   and the function now only releases holds whose order is unpaid.
+4. **Row level security was decorative.** Policies existed but the roles had no
+   table grants, and everything ran as the owner, which bypasses RLS. Granted,
+   and it became load bearing.
+5. **Reseeding broke every open link.** The seed truncated the catalogue and
+   minted new class ids on every run. Now upserts on a natural key.
+6. **A malformed id was a 500**, because Postgres raises on a bad uuid cast.
+7. **formatMoney lived in lib/stripe**, dragging the server-only Stripe client
+   into the client bundle.
 
 ### Still to do
 
-1. Record the Loom. Script is in `../keiki-build-plan.html` section 08.
-2. Mid-semester join in the admin. The schema supports it
-   (`starts_from_session_id`) and the seed sets it, but there is no UI to
-   override it.
-3. The topbar search is presentational. It should either be wired up or removed
-   before the walkthrough, because a demo that clicks a dead control is worse
-   than one that never shows it.
+1. **Record the Loom.** Script in `../keiki-build-plan.html` section 08, but it
+   predates accounts and notifications, so it needs a pass first.
+2. **Google OAuth needs credentials.** The code path is written and the button
+   appears when `NEXT_PUBLIC_GOOGLE_AUTH=true`, but it cannot be demonstrated
+   without a Google client id and secret.
+3. **Resend needs an API key** to send for real. Local Mailpit is wired and
+   working, which is arguably the better demo anyway.
+4. **The topbar search is presentational.** Wire it to the families search or
+   remove it before recording. Clicking a dead control on camera is worse than
+   never showing it.
 
 ---
 

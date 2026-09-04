@@ -18,3 +18,7 @@ The overall build plan, the Loom script and the answers to all seven of their
 questions live one folder up, at `../keiki-build-plan.html`.
 
 **Deadline: 9 September 2026. Target 8 September.**
+
+- **`09-their-questions.md`** answers all seven of the questions they said they
+  would ask, written against what is actually built and verified. Read it before
+  recording the walkthrough.

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { sql } from "@/lib/db";
+import { isUuid } from "@/lib/uuid";
 import { formatMoney } from "@/lib/stripe";
 import RegisterForm from "./register-form";
 
@@ -13,6 +14,10 @@ export default async function RegisterPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
+  // A malformed id is a wrong address, not a server error. Without this the
+  // uuid comparison below raises in Postgres and the page 500s.
+  if (!isUuid(id)) notFound();
 
   const [cls] = await sql<
     {

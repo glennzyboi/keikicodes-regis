@@ -6,9 +6,20 @@
  *
  *   pnpm seed
  *
- * Safe to re-run: it clears the operational tables first. It does not delete
- * anything in Stripe, because Stripe objects are archived rather than deleted,
- * which is exactly the behaviour we want from a system of record for money.
+ * Safe to re-run, and re-running keeps the same class ids.
+ *
+ * That last part matters more than it sounds. This used to truncate the
+ * catalogue and insert fresh rows, which minted a new uuid for every class on
+ * every run. The Playwright suite reseeds in global setup, so running the tests
+ * invalidated every /register/<id> link anyone had open, and clicking Register
+ * returned a 404. The catalogue is now upserted on its natural key, campus plus
+ * title plus term, so ids survive.
+ *
+ * Only the operational tables are cleared: families, orders, holds and
+ * enrollments. Nothing in Stripe is deleted, because Stripe objects are
+ * archived rather than deleted, which is exactly the behaviour we want from a
+ * system of record for money. Stable class ids also stop it creating a
+ * duplicate Product and Price on every run.
  */
 import "dotenv/config";
 import postgres from "postgres";
@@ -149,23 +160,29 @@ function sessionDates(firstSession: string, weeks: number, start: string, end: s
 }
 
 async function main() {
-  console.log("Clearing operational tables...");
+  // Families, money and seats go. The catalogue stays, and is updated in place.
+  console.log("Clearing families, orders and seats...");
   await sql`truncate table enrollment_events, webhook_events, seat_holds, enrollments,
-            order_items, orders, children, parents, sessions, class_offerings, schools
+            order_items, orders, children, parents
             restart identity cascade`;
+  await sql`update class_offerings set seats_taken = 0`;
 
-  console.log("Creating schools...");
+  console.log("Upserting schools...");
   const schoolIds = new Map<string, string>();
   for (const s of SCHOOLS) {
     const [row] = await sql<{ id: string }[]>`
       insert into schools (name, timezone) values (${s.name}, 'Pacific/Honolulu')
+      on conflict (lower(name)) do update set timezone = excluded.timezone
       returning id`;
     schoolIds.set(s.name, row.id);
   }
 
-  console.log("Creating classes, sessions and Stripe prices...");
+  console.log("Upserting classes, sessions and Stripe prices...");
   for (const c of CLASSES) {
-    const [cls] = await sql<{ id: string }[]>`
+    // Upsert on the natural key, so the id is the one it had last time.
+    const [cls] = await sql<
+      { id: string; stripe_product_id: string | null; stripe_price_id: string | null }[]
+    >`
       insert into class_offerings
         (school_id, title, summary, term, weekday, start_time, end_time, weeks,
          first_session_date, capacity, price_cents, registration_opens_at, status)
@@ -173,36 +190,81 @@ async function main() {
         (${schoolIds.get(c.school)!}, ${c.title}, ${c.summary}, 'Fall 2026', ${c.weekday},
          ${c.start}, ${c.end}, ${c.weeks}, ${c.firstSession}, ${c.capacity},
          ${c.priceCents}, now() - interval '1 day', 'published')
-      returning id`;
+      on conflict (school_id, lower(title), term) do update
+        set summary = excluded.summary,
+            weekday = excluded.weekday,
+            start_time = excluded.start_time,
+            end_time = excluded.end_time,
+            weeks = excluded.weeks,
+            first_session_date = excluded.first_session_date,
+            capacity = excluded.capacity,
+            price_cents = excluded.price_cents,
+            registration_opens_at = excluded.registration_opens_at,
+            status = excluded.status
+      returning id, stripe_product_id, stripe_price_id`;
 
-    for (const s of sessionDates(c.firstSession, c.weeks, c.start, c.end)) {
-      await sql`insert into sessions (class_offering_id, seq, starts_at, ends_at)
-                values (${cls.id}, ${s.seq}, ${s.startsAt}, ${s.endsAt})`;
+    // Sessions are keyed by sequence within the class, so a reseed rewrites the
+    // dates in place rather than stacking a second term on top of the first.
+    const dates = sessionDates(c.firstSession, c.weeks, c.start, c.end);
+    for (const s of dates) {
+      await sql`insert into sessions (class_offering_id, seq, starts_at, ends_at, status)
+                values (${cls.id}, ${s.seq}, ${s.startsAt}, ${s.endsAt}, 'scheduled')
+                on conflict (class_offering_id, seq) do update
+                  set starts_at = excluded.starts_at,
+                      ends_at = excluded.ends_at,
+                      status = 'scheduled',
+                      rescheduled_from = null,
+                      note = null`;
     }
+    // Anything left from a longer previous term, or from a reschedule.
+    await sql`delete from sessions
+               where class_offering_id = ${cls.id} and seq > ${dates.length}`;
 
     // Our database owns the class. Stripe mirrors it, and holds the money truth.
-    const product = await stripe.products.create(
-      {
-        name: `${c.title} (${c.school})`,
-        description: c.summary,
-        metadata: { class_offering_id: cls.id, term: "Fall 2026" },
-      },
-      { idempotencyKey: `product:${cls.id}` },
-    );
-    const price = await stripe.prices.create(
-      {
-        product: product.id,
-        unit_amount: c.priceCents,
-        currency: "usd",
-        metadata: { class_offering_id: cls.id },
-      },
-      { idempotencyKey: `price:${cls.id}:${c.priceCents}` },
-    );
+    // Reuse the existing Product and Price when the amount has not moved: a new
+    // Price for an unchanged amount is clutter in an account that is meant to be
+    // a system of record.
+    let productId = cls.stripe_product_id;
+    let priceId = cls.stripe_price_id;
+
+    const currentPrice = priceId
+      ? await stripe.prices.retrieve(priceId).catch(() => null)
+      : null;
+    const priceMatches =
+      currentPrice?.unit_amount === c.priceCents && currentPrice?.active === true;
+
+    if (!productId) {
+      const product = await stripe.products.create(
+        {
+          name: `${c.title} (${c.school})`,
+          description: c.summary,
+          metadata: { class_offering_id: cls.id, term: "Fall 2026" },
+        },
+        { idempotencyKey: `product:${cls.id}` },
+      );
+      productId = product.id;
+    }
+
+    if (!priceMatches) {
+      // A price change mints a new Price and repoints. Stripe Prices are
+      // immutable, and the old one stays attached to the orders that used it.
+      const price = await stripe.prices.create(
+        {
+          product: productId,
+          unit_amount: c.priceCents,
+          currency: "usd",
+          metadata: { class_offering_id: cls.id },
+        },
+        { idempotencyKey: `price:${cls.id}:${c.priceCents}` },
+      );
+      priceId = price.id;
+    }
+
     await sql`update class_offerings
-                 set stripe_product_id = ${product.id}, stripe_price_id = ${price.id}
+                 set stripe_product_id = ${productId}, stripe_price_id = ${priceId}
                where id = ${cls.id}`;
 
-    console.log(`  ${c.title} at ${c.school}: ${c.capacity} seats, ${price.id}`);
+    console.log(`  ${c.title} at ${c.school}: ${c.capacity} seats, ${priceId}`);
   }
 
   console.log("Creating staff login...");

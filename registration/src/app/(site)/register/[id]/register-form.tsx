@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { HOLD_MINUTES } from "@/lib/holds";
 
 type Other = { id: string; title: string; school: string; price_cents: number; left: number };
 type Child = { firstName: string; lastName: string; dateOfBirth: string; notes: string };
@@ -255,7 +256,7 @@ export default function RegisterForm({
         )}
 
         <p className="mt-4 text-xs text-ink-soft">
-          Your seats are held for 15 minutes while you pay. Registering for{" "}
+          Your seats are held for {HOLD_MINUTES} minutes while you pay. Registering for{" "}
           <span className="font-semibold">{classTitle}</span>
           {extraClasses.length > 0 && ` and ${extraClasses.length} more`}.
         </p>

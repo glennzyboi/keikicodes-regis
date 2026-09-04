@@ -229,6 +229,30 @@ into the client bundle and crashed the page. Split into `lib/money.ts`.
   zero other failures.**
 - Playwright reseeds in global setup, so a run never inherits the run before it.
 
+### The 404 on Register, and why it happened
+
+Worth keeping, because it is the kind of bug that only appears once other
+things are working.
+
+The seed truncated `class_offerings` and inserted fresh rows, so every run
+minted a **new uuid for every class**. Once the Playwright suite started
+reseeding in global setup, running the tests silently invalidated every
+`/register/<id>` link anyone had open: the catalogue in a browser tab pointed at
+classes that no longer existed, and clicking Register gave Next's default
+"This page could not be found".
+
+Fixed three ways:
+
+- A natural key on the catalogue, `(school_id, lower(title), term)`, and the
+  seed upserts against it. Class ids and Stripe price ids now survive a reseed,
+  verified by diffing them across two runs. It also stops the seed creating a
+  duplicate Stripe Product and Price every time it runs.
+- A malformed id used to be a **500**, because Postgres raises on a bad uuid
+  cast. `lib/uuid.ts` guards the register page and the orders API, so a wrong
+  address is a 404.
+- A branded not-found page at `(site)/not-found.tsx`, so a stale link explains
+  itself instead of showing the word 404.
+
 ### Still to do
 
 1. Record the Loom. Script is in `../keiki-build-plan.html` section 08.

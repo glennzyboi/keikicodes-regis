@@ -10,13 +10,15 @@ trial task** that decides it.
 
 ## Read in this order
 
-1. **`08-build-status.md`** THE GOAL, how to run it, what is built, what is
+1. **`08-build-status.md`** the goal, how to run it, what is built, what is
    tested, every bug found, what is left. Start here, always.
 2. **`04-the-brief.md`** the assignment verbatim. Never work from a paraphrase.
-3. **`09-their-questions.md`** answers to all seven questions they said they
-   would ask, written against what is actually built and verified. This is the
-   source for the walkthrough, not the older plan document.
-4. **`10-test-it-yourself.md`** logins, the test card, and nine things to try in
+3. **`11-their-real-system.md`** how their registration actually works today,
+   read off their live site. This is the reason the schema looks the way it
+   does, and it is the strongest material in the whole folder for the Loom.
+4. **`09-their-questions.md`** answers to all seven questions they said they
+   would ask, written against what is actually built and verified.
+5. **`10-test-it-yourself.md`** logins, the test card, and the things to try in
    order. Use this to drive the system by hand.
 
 ## Reference
@@ -26,18 +28,25 @@ trial task** that decides it.
 - `01-company.md`, `03-people.md`, `05-hiring-thread.md`, `07-open-questions.md`
 
 The older overall plan and the first Loom script are one folder up at
-`../keiki-build-plan.html`. **Its section 08 script is out of date**: it predates
-parent accounts, the notifications outbox, the calendars and the console
-restructure. Section 10 still holds the unsent reply to Peter.
+`../keiki-build-plan.html`. **Its section 08 script is badly out of date**: it
+predates parent accounts, the notifications outbox, the calendars, the console
+restructure, and everything learned from their real catalogue. Section 10 still
+holds the unsent reply to Peter.
 
 ---
 
-## State as of 4 September 2026
+## State as of 5 September 2026
 
-Built, running locally, and covered by **61 passing tests** across auth,
-deliberate abuse, every admin tab, the parent journey, and the background jobs.
-Two consecutive full runs green, every database invariant clean.
+Built as a pnpm workspace: a domain package with no framework in it, an API
+service, and the Next.js site. Running locally, covered by **100 passing tests**
+across auth, deliberate abuse, the catalogue, the public API, every console tab,
+the parent journey and the background jobs. Two consecutive full runs green,
+every database invariant clean.
 
-Not yet done: **record the Loom**, and decide what to do about the one
-decorative search box in the console. Google sign in and Resend are wired but
-need credentials. Details in `08-build-status.md`.
+It runs on **their real catalogue**: 19 campuses, 10 programs, 28 offerings
+imported from their own live endpoints, with the 15 that partner schools enrol
+themselves correctly marked as not ours to sell.
+
+Not yet done: **record the Loom**, **send the reply to Peter**, and get Glenn's
+**Wise details**. Google sign in and Resend are wired but need credentials.
+Details in `08-build-status.md`.

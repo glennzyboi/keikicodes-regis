@@ -15,7 +15,9 @@
     "notify": "pnpm --filter api job:notify",
     "reminders": "pnpm --filter api job:reminders",
     "sweep": "pnpm --filter api job:sweep",
-    "test": "pnpm --filter web test"
+    "test": "pnpm --filter web test",
+    "verify:api": "pnpm --filter @keiki/core verify:api",
+    "seed:snapshot": "pnpm --filter @keiki/core seed -- --snapshot"
   },
   "devDependencies": {
     "typescript": "^5"

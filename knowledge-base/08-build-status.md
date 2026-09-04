@@ -1,309 +1,284 @@
-# Build status and knowledge transfer
+# Build status
 
-*Rewritten 4 September 2026 after the adversarial test pass. This is the file to
-read first when picking the work back up. Update it as things change.*
+*The one document to read before touching anything. Current as of 5 September 2026.*
 
 ---
 
 ## THE GOAL
 
-Build a **parent registration system** demo for Keiki Coders, record a Loom
-walkthrough, and send it. It is a **paid trial task**, USD 25 via Wise, and it
-replaces the interview they cancelled on 4 September.
+A parent registration system for Keiki Coders, built as a paid trial task that
+decides whether Glenn gets the job. USD 25 via Wise. It replaces the interview
+they cancelled on 4 September.
 
-**Deadline: 9 September 2026. Target sending on 8 September.**
+**Deadline 9 September, target 8 September.**
 
-The full brief is in `04-the-brief.md`, verbatim. Read that, never a paraphrase.
-The answers to all seven of their questions are in `09-their-questions.md`.
-`10-test-it-yourself.md` has the logins and a nine step walkthrough.
-
-They judge **structure and the decisions behind it**, in their own words. Five of
-their seven questions are about failure and concurrency, not features.
+Graded on "structure and the decisions behind it", in their own words, not on
+features. Five of their seven questions are about failure and concurrency. The
+brief is `04-the-brief.md`; read it rather than a paraphrase.
+`09-their-questions.md` answers all seven.
 
 ---
 
-## WHERE EVERYTHING LIVES
+## What changed on 5 September, and why it matters
 
-```
-Desktop/Upwork-Profile-Update/KeikiCoders/
-  knowledge-base/        client knowledge, the brief, brand tokens, these notes
-  registration/          the Next.js app
-  supabase/              config.toml and nine migrations
-  tools/stripe.exe       Stripe CLI 1.50.10, gitignored
-```
+The demo used to model a business that does not exist: six invented classes at
+three campuses. Reading their live site changed the schema, the parent side and
+the console. The evidence is in **`11-their-real-system.md`**, and it is the
+most useful document here after the brief.
 
-Nothing lives outside that folder. Git is local only, no remote, 16 commits.
+The short version: a program is a curriculum reused across campuses, over half
+their catalogue is registered on the school's own website and must never be sold
+here, a schedule is a first date, a last date and a list of holidays, and they
+use grades rather than ages. All four were wrong before.
 
 ---
 
-## RUNNING IT
+## Where everything lives
 
-Docker Desktop first. Then three terminals:
+```
+KeikiCoders/
+  packages/core/       the domain. No React, no Next.
+    src/               db, registration, refunds, notify, jobs, policies,
+                       identity, catalogue import and parsing
+    scripts/           seed, import-catalogue, jobs, thunder, verify-api-parity
+  apps/api/            Hono service: public catalogue, Stripe webhook, cron jobs
+  apps/web/            Next.js: parent site and office console
+  supabase/migrations/ 14 migrations. The schema is here and nowhere else.
+  fixtures/            a captured snapshot of their live catalogue
+  knowledge-base/      this
+  render.yaml          two services, three cron jobs
+```
+
+There is deliberately **no ORM and no TypeScript copy of the schema**. There was
+one, nothing read it, and it had already drifted.
+
+---
+
+## How to run it
+
+From `KeikiCoders/`. Docker Desktop must be running.
 
 ```bash
-# 1. Database, auth and the local mail server
-cd KeikiCoders && supabase start
+supabase start                   # database, auth, storage, local mail
+pnpm --filter web dev            # http://localhost:3000
+pnpm --filter api dev            # http://localhost:3001
 
-# 2. The app
-cd registration && ./node_modules/.bin/next dev --port 3000
-
-# 3. Stripe webhooks, from KeikiCoders/
-SK=$(grep '^STRIPE_SECRET_KEY=' registration/.env.local | cut -d= -f2)
+# Stripe webhooks, in its own terminal
+SK=$(grep '^STRIPE_SECRET_KEY=' apps/web/.env.local | cut -d= -f2)
 ./tools/stripe.exe listen --api-key "$SK" --forward-to localhost:3000/api/stripe/webhook
 ```
 
-The forwarder prints a signing secret. If it differs from
-`STRIPE_WEBHOOK_SECRET` in `registration/.env.local`, paste the new one in, or
-payments will be taken and never confirmed.
+The forwarder prints a signing secret each time it starts. If it differs from
+`STRIPE_WEBHOOK_SECRET` in `apps/web/.env.local`, paste the new one in. Without
+it, payments are taken and never confirmed.
 
-| Service | URL |
+**Ports are non-standard** (Supabase on 55320 to 55329) because two other
+Supabase stacks live on this machine.
+
+| What | Where |
 |---|---|
 | Parent site | http://localhost:3000 |
 | Office console | http://localhost:3000/admin |
-| Mailpit, every email lands here | http://127.0.0.1:55324 |
-| Supabase Studio | http://127.0.0.1:55323 |
-| API | http://127.0.0.1:55321 |
-| Database | `postgresql://postgres:postgres@127.0.0.1:55322/postgres` |
+| API service | http://localhost:3001 |
+| Local inbox | http://127.0.0.1:55324 |
+| Database browser | http://127.0.0.1:55323 |
 
-**Ports are deliberately non-standard.** Glenn has two other Supabase stacks
-(`checksocial`, `restorative-spaces`) holding 54321 to 54324.
-
-**pnpm refuses to run scripts** in this project because of ignored esbuild build
-scripts. **Call the binaries directly:**
-
-```bash
-./node_modules/.bin/tsx --env-file=.env.local scripts/<name>.ts
-./node_modules/.bin/playwright test
-./node_modules/.bin/next dev
-```
-
-### Logins, both created by the seed
+**Logins**, recreated by every seed so they always work:
 
 | Role | Email | Password |
 |---|---|---|
-| Staff | `ops@keikicoders.test` | `KeikiOps!2026` |
+| Office staff | `ops@keikicoders.test` | `KeikiOps!2026` |
 | Parent | `parent@keikicoders.test` | `KeikiParent!2026` |
 
-Re-running the seed resets both passwords, so these always work. Test card is
-`4242 4242 4242 4242`, any future expiry, any CVC.
+Test card `4242 4242 4242 4242`, any future expiry, any CVC. Stripe test mode
+throughout; no real money moves.
 
-### The five scripts
+---
+
+## Commands
 
 ```bash
-scripts/seed.ts        catalogue, sessions, Stripe prices, both logins
-scripts/notify.ts      deliver queued mail    (--watch, --dry)
-scripts/reminders.ts   queue day-of reminders (--days N, --dry)
-scripts/sweep-holds.ts release abandoned seats (--watch, --dry)
-scripts/thunder.ts     the concurrency proof  (--parents N, --class "Title")
+pnpm seed                    # reset to a known state, about five seconds
+pnpm seed --snapshot         # same, without calling their live endpoint
+pnpm import:catalogue        # pull their catalogue, live, upserting
+pnpm import:catalogue --dry  # run it all in a transaction and keep none of it
+pnpm verify:api              # diff our public API against their n8n webhooks
+pnpm thunder                 # 50 simultaneous registrations against one class
+pnpm notify / reminders / sweep
+pnpm test                    # 100 Playwright specs
 ```
-
-All are safe to run repeatedly. Seeding clears families, orders, holds and
-enrollments, and **leaves the catalogue alone**, so class ids survive and open
-links keep working.
 
 ---
 
-## WHAT THE SYSTEM DOES
+## The data model
 
-### Parents
+```
+schools ──┐
+programs ─┼──> class_offerings ──> sessions
+terms ────┘         │    │
+                    │    └──> offering_blackouts
+                    │
+   parents ──> children ──> enrollments ──> order_items ──> orders
+        │            │                          │
+        ├── guardians│                          └──> seat_holds
+        └── consents └── photo in private storage
+```
 
-- **Real accounts.** Supabase Auth, email and password. Google is wired but
-  needs client credentials. **No magic links:** the first cut used an HMAC signed
-  link, and a link that IS the credential is the wrong trade for a system holding
-  children's dates of birth and medical notes.
-- Browse a catalogue of expandable class cards, each with its own colour and
-  mark, showing live seat counts.
-- Register one or several children in one submission, one payment.
-- `/portal` shows every registration as a **month calendar with a filter per
-  child**, or as expandable detail cards, and requests a cancellation.
+**A program is a curriculum**, reused across campuses and terms. 10 programs
+behind 28 offerings. `class_offerings.title` is the offering's own label, which
+is not always the program name: Liholiho runs one curriculum twice on a Thursday
+as "(A+ students only)" and "(non A+ students)".
 
-### Office console at `/admin`
+**A schedule is a first date, a last date, a weekday and blackout dates.**
+`generate_sessions()` materialises it, and the part that took care is what it
+must never do: a session a human cancelled stays cancelled, a reschedule is left
+alone, and a date that falls out of range is deleted only when nothing
+references it and cancelled with a reason when something does. Blackouts appear
+as cancelled sessions rather than gaps, so a family sees why there is no class
+that week.
 
-Its own design system (`admin/ops.css`, imported only by the admin layout), dark
-rail, grouped by the job someone came to do:
+**Rules the database enforces**, not the application:
 
-| Group | Pages |
+- `seats_taken <= capacity`. Nothing can oversell, ever.
+- one live place per child per class, as a partial unique index
+- `first_session_date` must fall on the class weekday
+- an external offering must have somewhere to send families
+- an offering we sell must have a price
+- exactly one term can be current
+- `sessions` unique on `(class_offering_id, session_date)`, so regeneration is
+  keyed on a date rather than a position
+
+**Seats are taken before payment.** That single decision turns "payment
+succeeded but the write failed" from a data loss incident into a retryable
+no-op. `take_seat()` is one conditional UPDATE, so the winner is decided by row
+locking rather than by anything the application does.
+
+---
+
+## What is built
+
+**Parent side.** School first, because that is the only thing a parent arrives
+knowing, and it is the one part of their existing design that is exactly right.
+Grade filters the list and says how many it hid. Classes a campus enrols itself
+are listed, marked, and linked to the school, with no way to pay here.
+Registration collects everything their Fillout form collects, and stops asking
+for anything already on file: two children go on one order and one payment,
+which their form cannot do at all.
+
+**Office console.** Overview, Money (payments, cancellations and refunds in one
+place), Families, Students, Catalogue, Rosters, Schedule, Seat holds, Outbox,
+and a search box that actually searches.
+
+**The catalogue is editable**, which was the whole gap. Campuses, programs,
+terms and classes. The class editor previews the schedule as you type, and
+refuses or warns on the things a spreadsheet lets you do silently: capacity
+below the seats already taken, a price change with families already paid, a
+schedule move without telling the families in it.
+
+**The API service** answers the public catalogue in exactly the shape their n8n
+webhooks answer, so migrating their site is a one line change to a variable in a
+Squarespace code block.
+
+---
+
+## Verified, with numbers
+
+| Claim | Evidence |
 |---|---|
-| **Today** | Overview (chart, activity feed, capacity table), Money |
-| **People** | Families, Family detail, Students |
-| **Programs** | Classes, Class detail, Schedule calendar, Seat holds |
-| **Comms** | Outbox |
+| The schedule model matches their real data | 28 of 28 offerings reconcile against their own published session counts |
+| Our public API is a drop-in for theirs | every record present; four fields differ and each one is a decision, named by `pnpm verify:api` |
+| Nothing oversells | 50 simultaneous registrations against 12 seats: exactly 12 accepted |
+| The HTTP path too | 8 real signed in browser contexts racing 3 seats |
+| A paid seat is never swept | proven directly in SQL, and in the suite |
+| Reminders cannot double send | three runs, one email |
+| A child's photo is private | owning family 200, staff 200, another family denied, anonymous denied |
+| The whole thing | **100 specs, two consecutive green runs, every invariant clean** |
 
-- **Money** merges payments, cancellations and refunds into four sub tabs, with
-  an expandable ledger row per order.
-- **Family detail** is the CX page: keiki with medical notes, registrations,
-  payment history with Stripe links, every message sent, and an append only log
-  of phone calls.
-- **Class detail** carries roster, schedule and that class's payments, plus
-  transfer, cancel a date and reschedule a date.
+Invariants checked after a full run, all zero: oversold classes, seats that
+cannot be accounted for, children with two live places, paid orders never
+fulfilled, sessions off their class weekday, external offerings with no link,
+sold offerings with no price, consents with no version.
 
-### Automation
-
-- A **notifications outbox**. Messages are written in the same transaction as
-  the thing that caused them, and delivered by a worker. Nothing sends inline.
-- Triggers: registration confirmed, session cancelled, session rescheduled,
-  cancellation approved, day-of class reminder.
-- `dedupe_key` makes enqueueing idempotent, so a cron that fires hourly still
-  sends one reminder per family per session.
-- **Refunds go to Stripe automatically** on approval, keyed on the enrollment id
-  so a retry never pays a family twice. Full, pro rata, or a typed amount.
-- Resend in production, Mailpit locally, one interface, both plain HTTP.
+Current catalogue: 19 schools, 10 programs, 28 offerings, 13 of them sold here,
+412 scheduled sessions and 58 holidays.
 
 ---
 
-## THE DATA MODEL
+## The tests
 
-```
-schools ──< class_offerings ──< sessions
-                   │
-                   ├──< seat_holds
-                   │
-parents ──< children ──< enrollments >── order_items >── orders
-   │                          │
-   └──< support_notes         └──< enrollment_events
+**100 specs across eight files**, about four minutes. Several pay with a real
+test card against real Stripe, and one issues a real refund.
 
-notifications   staff   webhook_events
-```
-
-Nine migrations, applied in order. `20260904071342_initial_schema.sql` is the
-source of truth; `registration/src/lib/schema.ts` is a typed Drizzle mirror for
-queries only. **If they disagree, the SQL wins.**
-
-The invariants that matter, all in the database:
-
-- `check (seats_taken <= capacity)` on `class_offerings`
-- `take_seat()`, one atomic `update ... where seats_taken < capacity`
-- `one_live_place_per_child` partial unique index
-- `children_natural_key` unique on `(parent_id, lower(first), lower(last), dob)`
-- `orders_idempotent` unique on `(parent_id, idempotency_key)`
-- `class_offerings_natural_key` on `(school_id, lower(title), term)`
-- `notifications.dedupe_key` unique
-- `webhook_events.id` primary key on Stripe's own event id
-- `classes_clash()` and `clashing_enrollments()` for schedule conflicts
-- RLS on every table, default deny, **and the grants that make it real**
-
----
-
-## TESTS
-
-**61 specs across five files.** Run them with:
-
-```bash
-cd registration
-set -a && . ./.env.local && set +a
-./node_modules/.bin/playwright test
-```
-
-Global setup reseeds first, so a run never inherits the run before it. Global
-teardown closes the one shared database client.
-
-| File | Covers |
+| File | What it is for |
 |---|---|
-| `auth.spec.ts` | Every private page and write endpoint refused when signed out. A parent refused at all eight console pages. One family unable to read or cancel another's data. Parent credentials refused at the staff door with the session torn down. Identical messages for a wrong password and a nonexistent address. Staff are not a family. |
-| `abuse.spec.ts` | Seven malformed ids, seven malformed payloads, invalid JSON, SQL metacharacters stored verbatim, a script tag proven not to become an element, four open redirect payloads, and the business rules attacked from the API. |
-| `admin.spec.ts` | Every tab asserted against the database rather than a 200. Search, expandable rows, session cancellation emailing everyone, transfers, calendar navigation, outbox filters, protected holds. |
-| `parent.spec.ts` | Signup through cancellation, the card disclosure, seat counts matching the database, the date field, the portal calendar and child filter, and the full money lifecycle ending in a real Stripe refund. |
-| `jobs.spec.ts` | The four background scripts run as real processes, plus eight signed in browser contexts racing the endpoint. |
+| `auth.spec.ts` | Signed out, wrong role, one family reaching for another's data |
+| `abuse.spec.ts` | Malformed ids, injection, open redirects, photo theft, hostile URLs |
+| `admin.spec.ts` | Every console tab, checked against the database, plus the search |
+| `catalogue.spec.ts` | Schedule generation, catalogue CRUD, guardrails, conflicts, consent |
+| `api.spec.ts` | The public endpoints and the import, shape by shape |
+| `parent.spec.ts` | Signup through cancellation, and the full money lifecycle |
+| `jobs.spec.ts` | The background jobs, plus eight browser contexts racing |
+| `registration.spec.ts` | The path a family actually walks, end to end |
 
-**Verified, with numbers:**
-
-- **50 parents against 12 seats: exactly 12 accepted, 38 refused, 0 errors,
-  counter at 12/12.** Twice, independently.
-- Eight real signed in browser contexts racing the HTTP endpoint for 3 seats:
-  3 accepted, 5 refused, 0 errors.
-- Concurrent double submit: one order, one seat, one parent.
-- A partial refund reached Stripe as `re_...`, came back succeeded, freed the seat.
-- Running the reminder job three times queues the reminders once.
-- The sweeper released an abandoned hold and protected a paid one.
-- RLS both ways: staff see every family, anyone else sees none.
-
-**Database invariants after two full runs, all zero:** oversold classes, negative
-seats, counter drift, a child twice in a class, duplicate dedupe keys, staff who
-are also parents, paid orders never fulfilled.
+The suite reseeds in global setup, so it never inherits the previous run, and
+every spec that breaks something puts it back.
 
 ---
 
-## BUGS FOUND AND FIXED
+## Bugs found and fixed, worth mentioning on camera
 
-Kept because they are the interesting part, and because several are worth
-mentioning on camera.
+Twelve are in the git history from 4 September. These are the ones the new work
+found:
 
-1. **Stripe checkout changed shape.** Payment methods are a collapsed accordion,
-   so card fields do not exist until Card is chosen, and the row is covered by an
-   offscreen overlay. Use
-   `getByRole("radio", { name: "Card" }).check({ force: true })`.
-2. **A double clicked submit could 500.** Both requests called Stripe with the
-   same idempotency key. Fixed with a row lock per order.
-3. **The sweeper could take a seat back from a parent who had paid**, and holds
-   expired at 15 minutes against a 30 minute payment page.
-4. **Row level security was decorative.** Policies existed, grants did not, and
-   everything ran as the owner. Granted, and it became load bearing.
-5. **Reseeding broke every open link**, because the seed minted new class ids
-   each run. Now upserts on a natural key.
-6. **A malformed id was a 500**, because Postgres raises on a bad uuid cast.
-7. **`formatMoney` lived in `lib/stripe`**, dragging the server-only Stripe
-   client into the client bundle.
-8. **The date field discarded partial input**, so picking a month blanked it
-   before you could pick a year.
-9. **`thunder.ts` was silently broken** once registration required an account.
-   All 50 requests came back 401, so the concurrency proof was proving nothing
-   while still looking like it ran.
-10. **Staff visiting `/portal` got a 500**, and before that a phantom `parents`
-    row, because both sides share one Supabase session.
-11. **The seed used `listUsers()`**, which is paginated. Once enough test
-    accounts existed the staff account fell off page one and the seed tried to
-    create an account that already existed.
-12. **Every spec closed the shared database client in `afterAll`**, so the first
-    file to finish tore the pool out from under the rest.
+1. **`classes_clash` referred to a column that had been dropped.** Postgres does
+   not check a function body against the schema when a column goes, so the error
+   arrived at the first parent who tried to register rather than at the
+   migration. There is a spec for this now.
+2. **The seed hung forever.** It opened its own database client while the
+   importer used the shared one, so `end()` closed the wrong pool. Cost a ten
+   minute test run to find.
+3. **The import cried wolf.** It compared sessions currently running against
+   their published count, so the moment the office cancelled an afternoon it
+   reported three schedules as broken. An alert that fires on correct behaviour
+   is one people learn to ignore.
+4. **A parent could claim another family's photograph.** Storage enforced the
+   folder on the way in; nothing enforced it on the way back.
+5. **An imported link could be `javascript:`.** `new URL` accepts it happily,
+   and these strings end up in an href a parent clicks.
+6. **The concurrency proof was proving nothing.** It ran against whatever class
+   had the most room, which was sometimes emptier than the number of parents.
+7. **A client component dragged the Postgres driver into the browser bundle.**
+   The same shape as the earlier Stripe formatter incident.
+8. **postgres.js returns a `Date` for a `date` column**, so `String(d).slice(0, 10)`
+   produced "Tue Aug 25" and took the page down with a RangeError.
+9. **The command palette was two pixels tall.** The topbar has a
+   `backdrop-filter`, and any element with one becomes the containing block for
+   `position: fixed` inside it.
 
 ---
 
-## THINGS THAT WILL BITE A FRESH SESSION
+## Traps that keep costing time
 
-- **Heredocs in the Bash tool mangle backslashes.** Writing TypeScript or SQL
-  with `cat > file <<'EOF'` fails on apostrophes and escape sequences. **Use the
-  Write tool**, or write a Python patch script to the scratchpad and run that.
-  This has cost time repeatedly.
-- **`tx.json()` does not work** inside a `sql.begin()` transaction in
-  postgres.js. Use `${JSON.stringify(x)}::text::jsonb`. A plain `::jsonb` cast
-  stores a JSON **string**, not an object, which then renders as `undefined`.
-- **Dates go to postgres.js as ISO strings with an explicit cast**,
-  `${d.toISOString()}::timestamptz`. Passing a `Date` next to a jsonb cast
-  confuses the driver's type inference.
-- **The Stripe API version must be `2026-08-26.dahlia`.** Guessing returns 400.
-- **`supabase db reset` wipes everything.** Reseed after.
-- **The Playwright MCP browser locks to one session.** If it says "Browser is
-  already in use", kill the Chrome processes for that profile.
-- **Zero em dashes** in anything Glenn sends a client. House rule, absolute.
+- **Bash heredocs mangle TypeScript and SQL.** Apostrophes and backslashes get
+  eaten. Use the Write tool, or write a Python patch script.
+- **`::text::jsonb`**, not `::jsonb`, or a JSON string is stored instead of an
+  object and templates render "undefined".
+- **ISO strings plus `::timestamptz`** for dates, never a `Date` object next to
+  a jsonb cast.
+- **The Stripe API version is `2026-08-26.dahlia`.** Do not let a tool bump it.
+- **A class title is not unique.** The same curriculum runs at up to five
+  campuses. Always select by id.
+- **Zero em dashes** in anything Glenn sends.
 
 ---
 
-## STILL TO DO
+## Still to do
 
-1. **Record the Loom.** The script in `../keiki-build-plan.html` section 08
-   predates accounts, notifications, the calendars and the console restructure.
-   **It needs a rewrite before recording.** `09-their-questions.md` is current
-   and is the better source.
-2. **The topbar search in the console is decoration.** The Families and Students
-   search is real and tested; that one is not wired. Remove it or wire it before
-   recording, because clicking a dead control on camera is worse than never
-   showing it.
-3. **Google OAuth needs a client id and secret** to be demonstrable. The code
-   path is written; the button appears when `NEXT_PUBLIC_GOOGLE_AUTH=true`.
-4. **Resend needs an API key** to send for real. Local Mailpit works and is
-   arguably the better demo.
-5. Optional: a Content-Security-Policy. Deliberately not faked, because doing it
-   properly with Next's inline scripts means threading nonces through
-   middleware, which is a real task with a test pass.
-
----
-
-## OPEN QUESTIONS FOR GLENN
-
-1. **His Wise email or phone number**, for the payment line at the end of the
-   Loom. Asked twice, still unanswered.
-2. Whether to delete the empty `Desktop\KeikiCoders` folder.
-3. **The reply to Peter has still not gone out.** Drafted in
-   `../keiki-build-plan.html` section 10. It acknowledges the change and commits
-   to 8 September. A same day acknowledgement was the recommendation on the 4th;
-   it is now late enough that the draft should be reworded before it goes.
+1. **Record the Loom.** The old script in `../keiki-build-plan.html` section 08
+   predates all of this. `09-their-questions.md` is the source.
+2. **The reply to Peter has still not gone out.** Drafted in section 10 of the
+   same file, and now needs rewording given the delay.
+3. **Glenn's Wise email or phone**, which they need to send the $25.
+4. Google OAuth needs a client id and secret to be demonstrable.
+5. Resend needs an API key to send for real; local mail goes to Mailpit.
+6. A Content-Security-Policy, deliberately not faked.

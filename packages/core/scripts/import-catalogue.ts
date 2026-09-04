@@ -78,6 +78,20 @@ export function printReport(r: ImportReport) {
     );
   }
 
+  if (r.images.copied > 0 || r.images.failed.length > 0) {
+    console.log("");
+    console.log(
+      `  ${r.images.copied} pictures copied into our own storage. Theirs are signed ` +
+        `Airtable URLs that expire.`,
+    );
+    for (const f of r.images.failed.slice(0, 5)) {
+      console.log(`    could not copy ${f.what}: ${f.problem}`);
+    }
+    if (r.images.failed.length > 5) {
+      console.log(`    and ${r.images.failed.length - 5} more`);
+    }
+  }
+
   if (r.mismatches.length) {
     console.log("");
     console.log("  Session counts that disagree with theirs:");

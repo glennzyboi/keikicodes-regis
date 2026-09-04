@@ -201,6 +201,40 @@ test.describe("importing their catalogue", () => {
     }
   });
 
+  test("their pictures are copied, not linked", async ({ request }) => {
+    // Airtable attachment URLs are signed and expire. The ones captured at
+    // lunchtime were returning 410 Gone by the evening, so a catalogue that
+    // links to them is a catalogue whose pictures are all broken by the time
+    // anybody looks at it. Which would have happened halfway through the demo.
+    const base = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
+    const logos = await sql<{ name: string; logo_url: string }[]>`
+      select name, logo_url from schools where logo_url is not null`;
+    expect(logos.length, "the campuses have logos").toBeGreaterThan(0);
+
+    for (const s of logos) {
+      expect(s.logo_url, `${s.name} logo is ours`).toContain(
+        `${base}/storage/v1/object/public/`,
+      );
+      expect(s.logo_url, `${s.name} does not point at Airtable`).not.toContain(
+        "airtableusercontent.com",
+      );
+    }
+
+    // And one of them actually resolves, rather than being a tidy dead link.
+    const res = await request.get(logos[0].logo_url);
+    expect(res.status(), `${logos[0].name} logo loads`).toBe(200);
+    expect(res.headers()["content-type"]).toContain("image/");
+
+    const images = await sql<{ name: string; image_url: string }[]>`
+      select name, image_url from programs where image_url is not null`;
+    for (const p of images) {
+      expect(p.image_url, `${p.name} image is ours`).toContain(
+        `${base}/storage/v1/object/public/`,
+      );
+    }
+  });
+
   test("the import reconciles every schedule against their published counts", async () => {
     const output = runScript("import-catalogue.ts", ["--snapshot", "--dry"]);
     expect(output).toContain("DRY RUN");

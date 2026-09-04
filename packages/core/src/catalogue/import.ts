@@ -1,5 +1,6 @@
 import type { TransactionSql } from "postgres";
 import { sql } from "../db";
+import { copyImage, isOurs } from "./images";
 import {
   parseSnapshot,
   countSessions,
@@ -71,6 +72,8 @@ export type ImportReport = {
   needCapacity: string[];
   unusable: { title: string; problems: string[] }[];
   mismatches: OfferingOutcome[];
+  /** Pictures copied into our own storage, and the ones that would not come. */
+  images: { copied: number; failed: { what: string; problem: string }[] };
 };
 
 export const LIVE_SOURCE: Extract<ImportSource, { kind: "live" }> = {
@@ -130,6 +133,7 @@ export async function importCatalogue(opts: {
     needCapacity: [],
     unusable,
     mismatches: [],
+    images: { copied: 0, failed: [] },
   };
 
   await sql.begin(async (tx) => {
@@ -202,6 +206,17 @@ async function upsertSchools(
     const [before] = await tx<{ id: string; name: string; kind: string | null; area: string | null; logo_url: string | null }[]>`
       select id, name, kind, area, logo_url from schools where slug = ${s.slug}`;
 
+    // Their logo URLs are signed Airtable attachments and expire, so we keep
+    // our own copy. Skipped when what we already hold is ours.
+    if (s.logoUrl && !isOurs(before?.logo_url)) {
+      const copy = await copyImage(s.logoUrl, "school", s.slug);
+      if (copy.copied) report.images.copied += 1;
+      else if (copy.problem) report.images.failed.push({ what: s.name, problem: copy.problem });
+      s.logoUrl = copy.url;
+    } else if (isOurs(before?.logo_url)) {
+      s.logoUrl = before!.logo_url;
+    }
+
     const [row] = await tx<{ id: string }[]>`
       insert into schools (name, slug, kind, area, logo_url)
       values (${s.name}, ${s.slug}, ${s.kind}, ${s.area}, ${s.logoUrl})
@@ -246,12 +261,24 @@ async function upsertPrograms(
   }
 
   for (const [slug, o] of bySlug) {
-    const [before] = await tx<{ id: string; description: string | null }[]>`
-      select id, description from programs where slug = ${slug}`;
+    const [before] = await tx<{ id: string; description: string | null; image_url: string | null }[]>`
+      select id, description, image_url from programs where slug = ${slug}`;
+
+    let imageUrl = o.imageUrl;
+    if (imageUrl && !isOurs(before?.image_url)) {
+      const copy = await copyImage(imageUrl, "program", slug);
+      if (copy.copied) report.images.copied += 1;
+      else if (copy.problem) {
+        report.images.failed.push({ what: o.programName, problem: copy.problem });
+      }
+      imageUrl = copy.url;
+    } else if (isOurs(before?.image_url)) {
+      imageUrl = before!.image_url;
+    }
 
     const [row] = await tx<{ id: string }[]>`
       insert into programs (slug, name, track, subject, description, image_url)
-      values (${slug}, ${o.programName}, ${o.track}, ${o.subject}, ${o.description}, ${o.imageUrl})
+      values (${slug}, ${o.programName}, ${o.track}, ${o.subject}, ${o.description}, ${imageUrl})
       on conflict (slug) do update
         set name        = excluded.name,
             track       = coalesce(excluded.track, programs.track),

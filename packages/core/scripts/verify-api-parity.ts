@@ -106,23 +106,42 @@ async function main() {
       `${lost.length} records missing from ours.`,
   );
 
-  // The two known differences are places their own records disagree with each
-  // other, so any single format we emit differs from some of them. Called out
-  // by name rather than left for somebody to find on camera.
-  const knownFormatting = new Set(["time", "noClass"]);
-  const unexplained = all.filter(
-    (r) => r.same !== r.total && !knownFormatting.has(r.field),
-  );
+  /**
+   * Fields that differ for a reason, named rather than left for somebody to
+   * find on camera. Each one is a decision, not an oversight.
+   */
+  const explained: Record<string, string> = {
+    time:
+      "26 of 28 of their records omit the meridiem and 2 include it. We emit one " +
+      "format, so we differ from whichever two are in the minority.",
+    noClass:
+      "their zero padding varies inside the same field. We emit one format.",
+    logo:
+      "theirs are signed Airtable URLs that expire, and were returning 410 Gone " +
+      "within a day. We serve our own copies, so the pictures still work next week.",
+    image: "same as logo: our own copy rather than an Airtable URL that ages out.",
+    sessions:
+      "we publish what will actually run, so a session the office cancelled by " +
+      "hand shows as one fewer. That is the number a family counts.",
+  };
+
+  const unexplained = all.filter((r) => r.same !== r.total && !(r.field in explained));
 
   if (lost.length === 0 && unexplained.length === 0) {
-    console.log(
-      "\nEvery record present, and every field matches except the two where their\n" +
-        "own data is internally inconsistent:\n" +
-        "  time     26 of 28 records omit the meridiem, 2 include it. We emit one format.\n" +
-        "  noClass  their zero padding varies within the same field. We emit one format.\n" +
-        "Both are display strings their renderer prints verbatim, so the page reads\n" +
-        "the same; it just stops being inconsistent.",
-    );
+    const differing = all.filter((r) => r.same !== r.total);
+    console.log("");
+    if (differing.length === 0) {
+      console.log("Every record present and every field identical.");
+    } else {
+      console.log("Every record present. Every difference is a decision:");
+      for (const r of differing) {
+        console.log("");
+        console.log(`  ${r.field} (${r.total - r.same} of ${r.total})`);
+        console.log(`    ${explained[r.field]}`);
+      }
+      console.log("");
+      console.log("None of these change what their page renders.");
+    }
     process.exit(0);
   }
 

@@ -179,3 +179,154 @@ export const TransferForm = z.object({
   enrollmentId: uuid,
   toClassId: uuid,
 });
+
+// ---------------------------------------------------------------------------
+// The catalogue.
+//
+// These are the forms that stop the office having to ask a developer to add a
+// class. They are the ones with real consequences behind them: a capacity below
+// the number of children already enrolled, a price change after money has
+// moved, a schedule change that quietly relocates somebody's Tuesday. The
+// checks that matter are in the action and in the database; these are the first
+// gate, not the only one.
+// ---------------------------------------------------------------------------
+
+/** Kindergarten is 0, matching the column and sorting correctly. */
+export const grade = z.coerce.number().int().min(0).max(12);
+
+const optionalGrade = z
+  .union([grade, z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined ? null : Number(v)));
+
+/** "15:15" from a time input, stored as "15:15:00". */
+export const clockTime = z
+  .string()
+  .regex(/^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/, "Use the time picker")
+  .transform((v) => (v.length === 5 ? `${v}:00` : v));
+
+const optionalUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((v) => v === "" || /^https?:\/\//i.test(v), "Links must start with http or https")
+  .transform((v) => (v === "" ? null : v));
+
+/** A checkbox that is either present or absent in FormData. */
+const checkbox = z
+  .union([z.literal("on"), z.literal("true"), z.literal("1"), z.literal("")])
+  .optional()
+  .transform((v) => v === "on" || v === "true" || v === "1");
+
+export const SchoolForm = z.object({
+  schoolId: z.union([uuid, z.literal("")]).optional(),
+  name: text(120, 2),
+  kind: z.enum(["public", "private", "charter", ""]).transform((v) => (v ? v : null)),
+  area: optionalText(80),
+  timezone: text(60, 3),
+  logoUrl: optionalUrl,
+  externalRegistrationUrl: optionalUrl,
+  active: checkbox,
+});
+
+export const ProgramForm = z.object({
+  programId: z.union([uuid, z.literal("")]).optional(),
+  name: text(160, 2),
+  track: optionalText(60),
+  subject: optionalText(80),
+  description: optionalText(4000),
+  imageUrl: optionalUrl,
+  active: checkbox,
+});
+
+export const TermForm = z.object({
+  termId: z.union([uuid, z.literal("")]).optional(),
+  name: text(60, 3),
+  startsOn: isoDate,
+  endsOn: isoDate,
+  isCurrent: checkbox,
+});
+
+export const OfferingForm = z
+  .object({
+    offeringId: z.union([uuid, z.literal("")]).optional(),
+    schoolId: uuid,
+    programId: uuid,
+    termId: uuid,
+    title: text(160, 2),
+    weekday: z.coerce.number().int().min(0).max(6),
+    startTime: clockTime,
+    endTime: clockTime,
+    firstSessionDate: isoDate,
+    lastSessionDate: isoDate,
+    capacity: z.coerce.number().int().min(1, "A class needs at least one seat").max(500),
+    priceCents: z
+      .union([cents, z.literal("")])
+      .optional()
+      .transform((v) => (v === "" || v === undefined ? null : Number(v))),
+    registrationMode: z.enum(["keiki_coders", "external"]),
+    externalRegistrationUrl: optionalUrl,
+    gradeMin: optionalGrade,
+    gradeMax: optionalGrade,
+    location: optionalText(160),
+    specialNotes: optionalText(2000),
+    status: z.enum(["draft", "published", "closed"]),
+    // One date per line, which is how somebody pastes a term calendar.
+    blackoutDates: z
+      .string()
+      .max(2000)
+      .optional()
+      .transform((v) =>
+        (v ?? "")
+          .split(/[\n,]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      .refine(
+        (list) => list.every((d) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d)),
+        "Holiday dates must be written as YYYY-MM-DD, one per line",
+      ),
+  })
+  .refine((v) => v.endTime > v.startTime, {
+    message: "The class has to end after it starts",
+    path: ["endTime"],
+  })
+  .refine((v) => v.lastSessionDate >= v.firstSessionDate, {
+    message: "The last date has to be on or after the first",
+    path: ["lastSessionDate"],
+  })
+  .refine(
+    (v) => v.gradeMin === null || v.gradeMax === null || v.gradeMax >= v.gradeMin,
+    { message: "The highest grade has to be at or above the lowest", path: ["gradeMax"] },
+  )
+  .refine((v) => v.registrationMode !== "external" || v.externalRegistrationUrl !== null, {
+    message: "A class the school enrols needs a link to send families to",
+    path: ["externalRegistrationUrl"],
+  })
+  .refine((v) => v.registrationMode !== "keiki_coders" || v.priceCents !== null, {
+    message: "A class we sell needs a price",
+    path: ["priceCents"],
+  })
+  .refine(
+    (v) => {
+      // The generator walks weekly from the first date, so that date has to be
+      // on the class weekday or the schedule and the calendar disagree in
+      // silence. The database has a constraint; this is the readable refusal.
+      const [y, m, d] = v.firstSessionDate.split("-").map(Number);
+      return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === v.weekday;
+    },
+    {
+      message: "The first date has to fall on the day of the week the class runs",
+      path: ["firstSessionDate"],
+    },
+  );
+
+export const OfferingIdForm = z.object({ offeringId: uuid });
+export const SchoolIdForm = z.object({ schoolId: uuid });
+export const ProgramIdForm = z.object({ programId: uuid });
+export const TermIdForm = z.object({ termId: uuid });
+
+export const ImportForm = z.object({
+  source: z.enum(["live", "snapshot"]),
+  dryRun: checkbox,
+});

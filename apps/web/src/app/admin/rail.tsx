@@ -57,8 +57,15 @@ export function Rail({
     { href: "/admin/students", label: "Students", icon: "child", count: counts.students, tone: "quiet" },
   ];
 
+  // The catalogue is what the office edits; the rest of this group is what it
+  // then watches. Keeping them apart stops "add a class" and "who is in this
+  // class" competing for the same tab.
+  const catalogue: Item[] = [
+    { href: "/admin/catalogue/classes", label: "Catalogue", icon: "book", count: counts.classes, tone: "quiet" },
+  ];
+
   const programs: Item[] = [
-    { href: "/admin/classes", label: "Classes", icon: "book", count: counts.classes, tone: "quiet" },
+    { href: "/admin/classes", label: "Rosters", icon: "users", count: counts.classes, tone: "quiet" },
     { href: "/admin/schedule", label: "Schedule", icon: "calendar" },
     { href: "/admin/holds", label: "Seat holds", icon: "clock", count: counts.holds, tone: "quiet" },
   ];
@@ -88,6 +95,7 @@ export function Rail({
 
       <Group label="Today" items={today} pathname={pathname} />
       <Group label="People" items={people} pathname={pathname} />
+      <Group label="Catalogue" items={catalogue} pathname={pathname} />
       <Group label="Programs" items={programs} pathname={pathname} />
       <Group label="Comms" items={comms} pathname={pathname} />
 

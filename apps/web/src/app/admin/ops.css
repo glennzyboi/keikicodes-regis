@@ -504,3 +504,26 @@
     }
   }
 }
+
+/* ------------------------------------------------------- inline results */
+/*
+  What a save just did. Deliberately inline next to the button rather than a
+  toast in a corner: the office is reading the form, not watching the edges of
+  the screen, and a message that fades is a message somebody misses.
+*/
+.ops-ok,
+.ops-warn {
+  display: block;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ops-ok {
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+.ops-warn {
+  background: var(--ops-warn-soft);
+  color: var(--ops-warn);
+}

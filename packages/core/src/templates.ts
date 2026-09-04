@@ -20,7 +20,8 @@ export type TemplateName =
   | "session_cancelled"
   | "session_rescheduled"
   | "class_reminder"
-  | "cancellation_approved";
+  | "cancellation_approved"
+  | "schedule_changed";
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -219,6 +220,41 @@ export function render(template: TemplateName, p: Payload): Rendered {
           p.note ? `\n${p.note}` : "",
           ``,
           `Campus: ${p.school}`,
+          ``,
+          portal,
+        ].join("\n"),
+      };
+    }
+
+    case "schedule_changed": {
+      // Sent when the office moves a whole class, not one session. Their system
+      // has no way to do this at all: a schedule change today means somebody
+      // remembering to email everybody by hand, which is exactly the sort of
+      // job that gets half done on a Friday.
+      const subject = `${p.className} has a new schedule`;
+      return {
+        subject,
+        html: layout({
+          preheader: `${p.className} now runs ${p.schedule}.`,
+          heading: "The schedule has changed",
+          body: `<p style="margin:0;">We have changed when ${escape(p.className)} runs. ${escape(String(p.childName))} is still registered; nothing needs doing.</p>
+                 ${rows([
+                   ["Class", String(p.className)],
+                   ["Now runs", String(p.schedule)],
+                   ["First session", String(p.firstSession)],
+                   ["Last session", String(p.lastSession)],
+                 ])}
+                 <p style="margin:14px 0 0;">Your registration page has the full list of dates, holidays included.</p>`,
+          cta: { label: "See the new dates", url: portal },
+        }),
+        text: [
+          `We have changed when ${p.className} runs. ${p.childName} is still registered; nothing needs doing.`,
+          ``,
+          `Now runs: ${p.schedule}`,
+          `First session: ${p.firstSession}`,
+          `Last session: ${p.lastSession}`,
+          ``,
+          `The full list of dates, holidays included, is on your registration page.`,
           ``,
           portal,
         ].join("\n"),

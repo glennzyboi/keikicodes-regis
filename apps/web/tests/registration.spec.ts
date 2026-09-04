@@ -66,8 +66,10 @@ async function payWithTestCard(page: Page) {
 test("registration requires an account, and sends you back where you were going", async ({
   page,
 }) => {
-  const [cls] = await sql<{ id: string }[]>`
-    select id from class_offerings where title = 'Web Design Basics'`;
+  const [cls] = await sql<{ id: string; title: string }[]>`
+    select id, title from class_offerings
+     where status = 'published' and registration_mode = 'keiki_coders'
+     limit 1`;
 
   await page.goto(`/register/${cls.id}`);
 
@@ -78,7 +80,7 @@ test("registration requires an account, and sends you back where you were going"
   await signUp(page, `${unique("gate")}@example.test`, "Gate Tester");
 
   await page.goto(`/register/${cls.id}`);
-  await expect(page.getByRole("heading", { name: "Web Design Basics" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: cls.title })).toBeVisible();
   await expect(page.getByText("Signed in")).toBeVisible();
 });
 
@@ -88,15 +90,20 @@ test("a parent registers two children, pays, and the webhook confirms it", async
 
   await signUp(page, email, "Kai Parent");
 
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: /register your keiki/i })).toBeVisible();
+  // A class with room for both children, that we actually sell. Hardcoding a
+  // title would inherit whatever the specs before this one did to that class.
+  const [target] = await sql<{ title: string; grade: number; school_slug: string }[]>`
+    select c.title, coalesce(c.grade_min, 3) as grade, s.slug as school_slug
+      from class_offerings c join schools s on s.id = c.school_id
+     where c.status = 'published' and c.registration_mode = 'keiki_coders'
+       and c.capacity - c.seats_taken >= 2
+     order by c.capacity - c.seats_taken desc limit 1`;
 
-  // A class with room for both children. Hardcoding a title would inherit
-  // whatever the specs before this one did to that class.
-  const [target] = await sql<{ title: string }[]>`
-    select title from class_offerings
-     where status = 'published' and capacity - seats_taken >= 2
-     order by capacity - seats_taken desc limit 1`;
+  // The whole path a family actually walks: the front door asks which school
+  // first, because that is the only thing a parent arrives knowing.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /find your keiki/i })).toBeVisible();
+  await page.goto(`/schools/${target.school_slug}`);
 
   // The card opens to reveal the full detail and the register link, so the
   // spec goes through the same disclosure a parent does.
@@ -105,18 +112,33 @@ test("a parent registers two children, pays, and the webhook confirms it", async
   await card.getByRole("link", { name: /Register for/ }).click();
   await expect(page.getByRole("heading", { name: target.title })).toBeVisible();
 
-  await page.getByLabel("First name").fill("Noa");
-  await page.getByLabel("Last name").fill(lastName);
+  await page.locator("#parent-phone").fill("808-555-0122");
+  await page.locator("#fn-0").fill("Noa");
+  await page.locator("#ln-0").fill(lastName);
+  await page.locator("#grade-0").selectOption(String(target.grade));
   await fillDate(page, 0, "2017-04-02");
 
   // Second child in the same submission: one order, two seats, one payment.
+  // Their form cannot do this at all: a family with two keiki fills it in
+  // twice, retypes both parents, and pays twice.
   await page.getByRole("button", { name: "Add another child" }).click();
   await page.locator("#fn-1").fill("Leo");
   await page.locator("#ln-1").fill(lastName);
+  await page.locator("#grade-1").selectOption(String(target.grade));
   await fillDate(page, 1, "2019-08-11");
 
+  // Every required tick: the campus attestation per child, and the consent.
+  const required = page.locator('input[type="checkbox"][required]');
+  for (let i = 0; i < (await required.count()); i++) await required.nth(i).check();
+
+  // Count by id, not title. The same curriculum runs at five campuses now, so
+  // "where title = ..." matches several rows and the arithmetic is nonsense.
+  const [{ id: targetId }] = await sql<{ id: string }[]>`
+    select c.id from class_offerings c join schools s on s.id = c.school_id
+     where c.title = ${target.title} and s.slug = ${target.school_slug}`;
+
   const before = await sql<{ seats_taken: number }[]>`
-    select seats_taken from class_offerings where title = ${target.title}`;
+    select seats_taken from class_offerings where id = ${targetId}`;
 
   await page.getByRole("button", { name: "Continue to payment" }).click();
   await payWithTestCard(page);
@@ -143,7 +165,7 @@ test("a parent registers two children, pays, and the webhook confirms it", async
 
   // Seats moved by exactly two, and the holds were consumed rather than left behind.
   const after = await sql<{ seats_taken: number }[]>`
-    select seats_taken from class_offerings where title = ${target.title}`;
+    select seats_taken from class_offerings where id = ${targetId}`;
   expect(after[0].seats_taken).toBe(before[0].seats_taken + 2);
 
   const holds = await sql<{ n: number }[]>`
@@ -167,20 +189,25 @@ test("submitting the same registration twice creates one order, not two", async 
   const email = `${unique("twice")}@example.test`;
   await signUp(page, email, "Double Clicker");
 
-  const [cls] = await sql<{ id: string }[]>`
-    select id from class_offerings
-     where status = 'published' and capacity - seats_taken >= 1
+  const [cls] = await sql<{ id: string; grade: number }[]>`
+    select id, coalesce(grade_min, 3) as grade from class_offerings
+     where status = 'published' and registration_mode = 'keiki_coders'
+       and capacity - seats_taken >= 1
      order by capacity - seats_taken desc limit 1`;
 
   const payload = {
     idempotencyKey: unique("idem"),
+    agreedToPolicies: true,
     registrations: [
       {
         classOfferingId: cls.id,
+        attendsSchoolConfirmed: true,
         child: {
           firstName: "Mia",
           lastName: unique("Lee").replace(/-/g, ""),
           dateOfBirth: "2016-02-20",
+          grade: cls.grade,
+          inAfterschoolCare: false,
         },
       },
     ],
@@ -199,8 +226,8 @@ test("submitting the same registration twice creates one order, not two", async 
     api.post("/api/register", { data: payload }),
   ]);
 
-  expect(a.ok()).toBeTruthy();
-  expect(b.ok()).toBeTruthy();
+  expect(a.ok(), await a.text()).toBeTruthy();
+  expect(b.ok(), await b.text()).toBeTruthy();
   const first = await a.json();
   const second = await b.json();
   expect(first.orderId).toBe(second.orderId);

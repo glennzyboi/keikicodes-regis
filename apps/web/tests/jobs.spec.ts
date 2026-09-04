@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { sql, unique, signUpParent, registerAndPay, freeClass } from "./helpers";
+import { sql, unique, signUpParent, registerAndPay, freeClass, okGrade } from "./helpers";
 import type { Browser } from "@playwright/test";
 
 /**
@@ -17,6 +17,21 @@ const root = path.resolve(__dirname, "..");
 const require = createRequire(__filename);
 const tsx = path.join(path.dirname(require.resolve("tsx/package.json")), "dist", "cli.mjs");
 
+/**
+ * Run a background job exactly the way the cron does.
+ *
+ * One dispatcher rather than three scripts, because the API service schedules
+ * the same functions and "it worked when I ran it" should be a statement about
+ * the same code that runs at 7am.
+ */
+function runJob(job: "notify" | "reminders" | "sweep", args: string[] = []) {
+  return execFileSync(
+    process.execPath,
+    [tsx, "--env-file=.env.local", "../../packages/core/scripts/jobs.ts", job, ...args],
+    { cwd: root, encoding: "utf8" },
+  );
+}
+
 function runScript(script: string, args: string[] = []) {
   return execFileSync(
     process.execPath,
@@ -30,7 +45,7 @@ test.describe("the notification worker", () => {
     const email = `${unique("worker")}@example.test`;
     await signUpParent(page, email, "Worker Family");
     const target = await freeClass(1);
-    await registerAndPay(page, target.id, {
+    await registerAndPay(page, target, {
       first: "Mailed",
       last: unique("Kid").replace(/-/g, ""),
       dob: "2015-02-02",
@@ -42,7 +57,7 @@ test.describe("the notification worker", () => {
        where p.email = ${email} and n.template = 'registration_confirmed'`;
     expect(queued.status, "fulfilment queues rather than sends").toBe("queued");
 
-    const output = runScript("notify.ts");
+    const output = runJob("notify");
     expect(output).toContain("sent [registration_confirmed]");
 
     const [after] = await sql<
@@ -60,8 +75,8 @@ test.describe("the notification worker", () => {
     // Drain whatever is outstanding first. Other specs queue mail as a side
     // effect of registering, so asserting on a single run would be asserting
     // about the order the files happened to run in.
-    runScript("notify.ts");
-    const second = runScript("notify.ts");
+    runJob("notify");
+    const second = runJob("notify");
     expect(second).toContain("nothing due");
 
     const [{ n }] = await sql<{ n: number }[]>`
@@ -78,7 +93,7 @@ test.describe("the notification worker", () => {
               'cancelled', ${unique("stopped")})
       returning id`;
 
-    runScript("notify.ts");
+    runJob("notify");
 
     const [after] = await sql<{ status: string; sent_at: Date | null }[]>`
       select status, sent_at from notifications where id = ${target.id}`;
@@ -92,7 +107,7 @@ test.describe("the notification worker", () => {
 test.describe("reminders", () => {
   test("queue once, and never twice however many times the job runs", async () => {
     // Wide enough window to catch the first sessions of the term.
-    const first = runScript("reminders.ts", ["--days", "30"]);
+    const first = runJob("reminders", ["--days", "30"]);
     const queuedMatch = first.match(/Queued (\d+) reminder/);
     const queued = Number(queuedMatch?.[1] ?? 0);
 
@@ -102,8 +117,8 @@ test.describe("reminders", () => {
       select count(*)::int as n from notifications where template = 'class_reminder'`;
 
     // Run it twice more. The dedupe key is what stops a cron double sending.
-    runScript("reminders.ts", ["--days", "30"]);
-    const third = runScript("reminders.ts", ["--days", "30"]);
+    runJob("reminders", ["--days", "30"]);
+    const third = runJob("reminders", ["--days", "30"]);
     expect(third).toContain("Queued 0 reminders");
     expect(third).toContain("already queued");
 
@@ -122,7 +137,7 @@ test.describe("reminders", () => {
   test("the dry run changes nothing", async () => {
     const [{ n: before }] = await sql<{ n: number }[]>`
       select count(*)::int as n from notifications`;
-    runScript("reminders.ts", ["--days", "30", "--dry"]);
+    runJob("reminders", ["--days", "30", "--dry"]);
     const [{ n: after }] = await sql<{ n: number }[]>`
       select count(*)::int as n from notifications`;
     expect(after).toBe(before);
@@ -131,38 +146,51 @@ test.describe("reminders", () => {
 
 test.describe("the seat sweeper", () => {
   test("releases an abandoned hold and protects a paid one", async () => {
-    // An abandoned checkout: a pending order with an expired hold.
-    const [pending] = await sql<{ order_item_id: string; class_offering_id: string }[]>`
-      select oi.id as order_item_id, oi.class_offering_id
-        from order_items oi join orders o on o.id = oi.order_id
-       where o.status = 'pending'
-       limit 1`;
+    // Both cases are built here rather than borrowed from whatever the specs
+    // before this one happened to leave lying around. Picking "the first paid
+    // order" made this test depend on the order the files ran in, and it
+    // eventually failed for a reason that had nothing to do with the sweeper.
+    const cls = await freeClass(2);
 
-    // And the dangerous case: an expired hold on an order that is already paid.
-    const [paid] = await sql<{ order_item_id: string; class_offering_id: string }[]>`
-      select oi.id as order_item_id, oi.class_offering_id
-        from order_items oi join orders o on o.id = oi.order_id
-       where o.status = 'paid'
-       limit 1`;
+    const [parent] = await sql<{ id: string }[]>`
+      insert into parents (email, full_name)
+      values (${`${unique("sweep")}@example.test`}, 'Sweep Family')
+      returning id`;
+    const [child] = await sql<{ id: string }[]>`
+      insert into children (parent_id, first_name, last_name, date_of_birth, grade)
+      values (${parent.id}, 'Sweep', 'Child', '2016-01-01', ${okGrade(cls)})
+      returning id`;
 
-    test.skip(!paid, "no paid order to protect");
+    const make = async (status: string) => {
+      const [order] = await sql<{ id: string }[]>`
+        insert into orders (parent_id, idempotency_key, status, amount_cents)
+        values (${parent.id}, ${unique("sweep-order")}, ${status}, 40000)
+        returning id`;
+      const [item] = await sql<{ id: string }[]>`
+        insert into order_items (order_id, class_offering_id, child_id, unit_price_cents)
+        values (${order.id}, ${cls.id}, ${child.id}, 40000)
+        returning id`;
+      await sql`select take_seat(${cls.id})`;
+      return { order_item_id: item.id, class_offering_id: cls.id };
+    };
+
+    const paid = await make("paid");
+    const pending = await make("pending");
 
     await sql`insert into seat_holds (order_item_id, class_offering_id, expires_at)
               values (${paid.order_item_id}, ${paid.class_offering_id},
                       now() - interval '5 minutes')
               on conflict (order_item_id) do update set expires_at = now() - interval '5 minutes'`;
 
-    if (pending) {
-      await sql`insert into seat_holds (order_item_id, class_offering_id, expires_at)
-                values (${pending.order_item_id}, ${pending.class_offering_id},
-                        now() - interval '5 minutes')
-                on conflict (order_item_id) do update set expires_at = now() - interval '5 minutes'`;
-    }
+    await sql`insert into seat_holds (order_item_id, class_offering_id, expires_at)
+              values (${pending.order_item_id}, ${pending.class_offering_id},
+                      now() - interval '5 minutes')
+              on conflict (order_item_id) do update set expires_at = now() - interval '5 minutes'`;
 
     const [paidSeatsBefore] = await sql<{ seats_taken: number }[]>`
       select seats_taken from class_offerings where id = ${paid.class_offering_id}`;
 
-    const output = runScript("sweep-holds.ts");
+    const output = runJob("sweep");
     expect(output).toContain("PROTECTED");
 
     // The paid hold is still there and the seat did not move.
@@ -170,18 +198,31 @@ test.describe("the seat sweeper", () => {
       select id from seat_holds where order_item_id = ${paid.order_item_id}`;
     expect(stillHeld, "a paid seat is never swept").toHaveLength(1);
 
+    // Exactly one seat came back: the abandoned one. The paid seat did not move.
     const [paidSeatsAfter] = await sql<{ seats_taken: number }[]>`
       select seats_taken from class_offerings where id = ${paid.class_offering_id}`;
-    expect(paidSeatsAfter.seats_taken).toBe(paidSeatsBefore.seats_taken);
+    expect(
+      paidSeatsAfter.seats_taken,
+      "the abandoned seat came back and the paid one did not",
+    ).toBe(paidSeatsBefore.seats_taken - 1);
 
     // The abandoned one is gone.
-    if (pending) {
+    {
       const released = await sql<{ id: string }[]>`
         select id from seat_holds where order_item_id = ${pending.order_item_id}`;
       expect(released, "an abandoned hold is released").toHaveLength(0);
     }
 
-    await sql`delete from seat_holds where order_item_id = ${paid.order_item_id}`;
+    // Put the class back exactly as it was found. The paid seat this test made
+    // is still counted, and leaving it would slowly starve the specs that come
+    // after by eating seats nobody can explain.
+    await sql`delete from seat_holds where class_offering_id = ${cls.id}
+               and order_item_id in (${paid.order_item_id}, ${pending.order_item_id})`;
+    await sql`delete from order_items where child_id = ${child.id}`;
+    await sql`delete from orders where parent_id = ${parent.id}`;
+    await sql`delete from children where id = ${child.id}`;
+    await sql`delete from parents where id = ${parent.id}`;
+    await sql`update class_offerings set seats_taken = ${cls.seats_taken} where id = ${cls.id}`;
   });
 });
 
@@ -189,14 +230,31 @@ test.describe("concurrency", () => {
   test("fifty parents cannot oversell twelve seats", async () => {
     // Its own class, restored afterwards, so filling it does not starve the
     // specs that run later.
-    const [target] = await sql<{ title: string; id: string; seats_taken: number }[]>`
-      select title, id, seats_taken from class_offerings
-       where status = 'published'
+    const [target] = await sql<
+      { title: string; id: string; seats_taken: number; capacity: number }[]
+    >`select title, id, seats_taken, capacity from class_offerings
+       where status = 'published' and registration_mode = 'keiki_coders'
        order by capacity - seats_taken desc
        limit 1`;
     const restoreTo = target.seats_taken;
 
-    const output = runScript("thunder.ts", ["--parents", "50", "--class", target.title]);
+    // Squeeze it to twelve free seats before firing.
+    //
+    // The contention has to be built, not hoped for. This test once ran against
+    // a class with more free seats than there were parents, so every request
+    // succeeded, every check passed, and the assertion about the capacity guard
+    // was quietly measuring nothing. A concurrency test that cannot fail is
+    // worse than no concurrency test.
+    const seats = 12;
+    await sql`update class_offerings set seats_taken = capacity - ${seats}
+               where id = ${target.id}`;
+
+    // By id: five campuses can run a class with this exact title.
+    const output = runScript("thunder.ts", ["--parents", "50", "--id", target.id]);
+
+    expect(output, "the run has to be oversubscribed to prove anything").toContain(
+      `accepted exactly the ${seats} free seats`,
+    );
 
     // Every check the script makes must pass.
     expect(output, "no check may fail").not.toContain("FAIL");
@@ -255,13 +313,17 @@ test.describe("concurrency over HTTP", () => {
           ctx.request.post("http://localhost:3000/api/register", {
             data: {
               idempotencyKey: unique(`race-${i}`),
+              agreedToPolicies: true,
               registrations: [
                 {
                   classOfferingId: cls.id,
+                  attendsSchoolConfirmed: true,
                   child: {
                     firstName: `Racer${i}`,
                     lastName: unique("R").replace(/-/g, ""),
                     dateOfBirth: "2015-01-01",
+                    grade: okGrade(cls),
+                    inAfterschoolCare: false,
                   },
                 },
               ],

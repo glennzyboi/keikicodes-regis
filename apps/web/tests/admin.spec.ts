@@ -122,7 +122,7 @@ test.describe("families and students", () => {
     const childLast = unique("Kaeo").replace(/-/g, "");
     await signUpParent(page, email, "Searchable Parent");
     const roomy = await freeClass(1);
-    await registerAndPay(page, roomy.id, {
+    await registerAndPay(page, roomy, {
       first: "Findme",
       last: childLast,
       dob: "2015-07-07",
@@ -151,7 +151,7 @@ test.describe("families and students", () => {
     const email = `${unique("detail")}@example.test`;
     await signUpParent(page, email, "Detail Family");
     const target = await freeClass(1);
-    await registerAndPay(page, target.id, {
+    await registerAndPay(page, target, {
       first: "Detailed",
       last: unique("Kid").replace(/-/g, ""),
       dob: "2014-03-03",
@@ -182,27 +182,33 @@ test.describe("families and students", () => {
     const email = `${unique("allergy")}@example.test`;
     await signUpParent(page, email, "Allergy Family");
 
-    const [cls] = await sql<{ id: string }[]>`
-      select id from class_offerings where seats_taken < capacity limit 1`;
+    const [cls] = await sql<{ id: string; grade: number }[]>`
+      select id, coalesce(grade_min, 3) as grade from class_offerings
+       where seats_taken < capacity and registration_mode = 'keiki_coders'
+       limit 1`;
     const last = unique("Nut").replace(/-/g, "");
 
     const res = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("allergy"),
+        agreedToPolicies: true,
         registrations: [
           {
             classOfferingId: cls.id,
+            attendsSchoolConfirmed: true,
             child: {
               firstName: "Peanut",
               lastName: last,
               dateOfBirth: "2016-06-06",
+              grade: cls.grade,
+              inAfterschoolCare: false,
               notes: "Severe peanut allergy, carries an EpiPen",
             },
           },
         ],
       },
     });
-    expect(res.ok()).toBeTruthy();
+    expect(res.ok(), await res.text()).toBeTruthy();
 
     await context.clearCookies();
     await signInStaff(page);
@@ -383,13 +389,26 @@ test.describe("schedule", () => {
   });
 
   test("a cancelled session is struck through, not hidden", async ({ page }) => {
-    const [cancelled] = await sql<{ id: string }[]>`
-      select id from sessions where status = 'cancelled' limit 1`;
+    // Holidays are cancelled sessions rather than gaps, so a family can see why
+    // there is no class that week. There are plenty in the real catalogue.
+    const [cancelled] = await sql<{ month: string }[]>`
+      select to_char(session_date, 'YYYY-MM') as month
+        from sessions where status = 'cancelled'
+       order by session_date limit 1`;
     test.skip(!cancelled, "nothing cancelled yet");
 
     await signInStaff(page);
     await page.goto("/admin/schedule");
-    await expect(page.locator('.cal-event[data-tone="cancelled"]').first()).toBeVisible();
+
+    // The calendar opens on the first month with anything in it, and the first
+    // holiday is usually a couple of months later. Page forward to find it,
+    // which also proves the month navigation works on real data.
+    const marker = page.locator('.cal-event[data-tone="cancelled"]').first();
+    for (let i = 0; i < 8; i++) {
+      if (await marker.isVisible().catch(() => false)) break;
+      await page.getByRole("button", { name: "Next month" }).click();
+    }
+    await expect(marker).toBeVisible();
   });
 });
 

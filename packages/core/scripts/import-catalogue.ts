@@ -63,17 +63,28 @@ export function printReport(r: ImportReport) {
       `${String(r.offerings.filter((o) => o.action === "updated").length).padStart(3)} changed`,
   );
 
-  const total = r.offerings.reduce((n, o) => n + o.sessionsGenerated, 0);
+  const total = r.offerings.reduce((n, o) => n + o.sessionsRunning, 0);
   const agree = r.offerings.filter((o) => o.reconciles).length;
   console.log("");
   console.log(`  ${total} sessions generated across ${r.offerings.length} offerings`);
   console.log(`  ${agree} of ${r.offerings.length} reconcile against their own published counts`);
 
+  const cancelled = r.offerings.filter((o) => o.staffCancelled > 0);
+  if (cancelled.length) {
+    const n = cancelled.reduce((t, o) => t + o.staffCancelled, 0);
+    console.log(
+      `  ${n} session${n === 1 ? "" : "s"} cancelled by staff across ${cancelled.length} ` +
+        `class${cancelled.length === 1 ? "" : "es"}, left exactly as they are`,
+    );
+  }
+
   if (r.mismatches.length) {
     console.log("");
     console.log("  Session counts that disagree with theirs:");
     for (const m of r.mismatches) {
-      console.log(`    ${m.title} at ${m.school}: they say ${m.sessionsStated}, we make ${m.sessionsGenerated}`);
+      console.log(
+        `    ${m.title} at ${m.school}: they say ${m.sessionsStated}, the schedule makes ${m.sessionsScheduled}`,
+      );
     }
   }
 

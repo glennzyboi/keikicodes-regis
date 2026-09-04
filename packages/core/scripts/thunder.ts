@@ -8,6 +8,7 @@
  *   pnpm thunder                     50 parents against the emptiest class
  *   pnpm thunder --parents 200       heavier
  *   pnpm thunder --class "Code Heroes: Virtual Reality"
+ *   pnpm thunder --id <uuid>         exactly that class, titles are not unique
  *
  * What it is proving: seats are taken with a single conditional UPDATE,
  *
@@ -37,11 +38,8 @@
  * several real browser contexts and fires them together.
  * ---------------------------------------------------------------------------
  */
-import postgres from "postgres";
 import { createPendingOrder } from "../src/registration";
-import { sql as appSql } from "../src/db";
-
-const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
+import { sql } from "../src/db";
 
 function arg(name: string, fallback: string) {
   const i = process.argv.indexOf(`--${name}`);
@@ -50,29 +48,56 @@ function arg(name: string, fallback: string) {
 
 const parents = Number(arg("parents", "50"));
 const className = arg("class", "");
+const classId = arg("id", "");
 
 async function main() {
-  // Named, or the emptiest class we actually sell. Hardcoding a title meant the
-  // script broke the moment the catalogue became the real one, and a class the
-  // school registers for cannot be bought here at all.
-  const [cls] = className
-    ? await sql<{ id: string; title: string; capacity: number; seats_taken: number }[]>`
-        select id, title, capacity, seats_taken from class_offerings
-         where lower(title) = lower(${className}) and registration_mode = 'keiki_coders'
-         order by capacity - seats_taken desc limit 1`
-    : await sql<{ id: string; title: string; capacity: number; seats_taken: number }[]>`
-        select id, title, capacity, seats_taken from class_offerings
-         where status = 'published' and registration_mode = 'keiki_coders'
-         order by capacity - seats_taken desc limit 1`;
+  // An id, a title, or the emptiest class we actually sell.
+  //
+  // The id matters. A title is not unique: the same curriculum runs at up to
+  // five campuses, so "--class Code Heroes: Virtual Reality" is a question with
+  // five answers. Picking one silently made a test squeeze one row and run
+  // against another, and the concurrency proof measured an uncontended class
+  // while reporting success.
+  type Row = { id: string; title: string; capacity: number; seats_taken: number; school: string };
 
+  const rows = classId
+    ? await sql<Row[]>`
+        select c.id, c.title, c.capacity, c.seats_taken, s.name as school
+          from class_offerings c join schools s on s.id = c.school_id
+         where c.id = ${classId}`
+    : className
+      ? await sql<Row[]>`
+          select c.id, c.title, c.capacity, c.seats_taken, s.name as school
+            from class_offerings c join schools s on s.id = c.school_id
+           where lower(c.title) = lower(${className})
+             and c.registration_mode = 'keiki_coders'
+           order by c.capacity - c.seats_taken desc`
+      : await sql<Row[]>`
+          select c.id, c.title, c.capacity, c.seats_taken, s.name as school
+            from class_offerings c join schools s on s.id = c.school_id
+           where c.status = 'published' and c.registration_mode = 'keiki_coders'
+           order by c.capacity - c.seats_taken desc limit 1`;
+
+  const cls = rows[0];
   if (!cls) {
     throw new Error(
-      className
-        ? `no class we sell called ${className}`
-        : "no published class with a seat in it",
+      classId
+        ? `no class with id ${classId}`
+        : className
+          ? `no class we sell called ${className}`
+          : "no published class with a seat in it",
     );
   }
-  const target = cls.title;
+
+  if (className && rows.length > 1) {
+    console.log(
+      `
+  "${className}" runs at ${rows.length} campuses. Using the emptiest, ` +
+        `${cls.school}. Pass --id ${cls.id} to be exact.`,
+    );
+  }
+
+  const target = `${cls.title} at ${cls.school}`;
 
   // A grade the class will accept, so the eligibility check is not what fails.
   const [range] = await sql<{ grade_min: number | null; grade_max: number | null }[]>`
@@ -195,16 +220,12 @@ async function main() {
   }
   console.log("");
 
-  // Both pools: the local one, and the app's shared client that
-  // createPendingOrder uses. Without the second the process never exits.
   await sql.end();
-  await appSql.end();
   if (!allPassed) process.exit(1);
 }
 
 main().catch(async (e) => {
   console.error(e);
   await sql.end().catch(() => {});
-  await appSql.end().catch(() => {});
   process.exit(1);
 });

@@ -22,23 +22,64 @@ export const sql = postgres(process.env.DATABASE_URL!, {
   onnotice: () => {},
 });
 
+export type TestClass = {
+  id: string;
+  title: string;
+  capacity: number;
+  seats_taken: number;
+  grade_min: number | null;
+  grade_max: number | null;
+  school_slug: string;
+  school: string;
+};
+
 /**
- * A class with at least this many seats free, right now.
+ * A class with at least this many seats free, that we actually sell.
  *
  * Tests share one database and one seed, so a spec that hardcodes a class title
  * inherits whatever the specs before it did to that class. Asking for room
  * instead of a name makes each test independent of the order it runs in.
+ *
+ * The registration_mode filter matters now: over half the real catalogue is
+ * enrolled through the school and cannot be paid for here at all, so a test
+ * that picked one at random would be testing the refusal by accident.
  */
-export async function freeClass(minSeats = 1) {
-  const [cls] = await sql<
-    { id: string; title: string; capacity: number; seats_taken: number }[]
-  >`select id, title, capacity, seats_taken
-      from class_offerings
-     where status = 'published' and capacity - seats_taken >= ${minSeats}
-     order by capacity - seats_taken desc
+export async function freeClass(minSeats = 1): Promise<TestClass> {
+  const [cls] = await sql<TestClass[]>`
+    select c.id, c.title, c.capacity, c.seats_taken, c.grade_min, c.grade_max,
+           s.slug as school_slug, s.name as school
+      from class_offerings c join schools s on s.id = c.school_id
+     where c.status = 'published'
+       and c.registration_mode = 'keiki_coders'
+       and c.capacity - c.seats_taken >= ${minSeats}
+     order by c.capacity - c.seats_taken desc
      limit 1`;
-  if (!cls) throw new Error(`no class has ${minSeats} seats free`);
+  if (!cls) throw new Error(`no sellable class has ${minSeats} seats free`);
   return cls;
+}
+
+/** A class the campus enrols itself, for the tests that prove we refuse it. */
+export async function externalClass(): Promise<TestClass> {
+  const [cls] = await sql<TestClass[]>`
+    select c.id, c.title, c.capacity, c.seats_taken, c.grade_min, c.grade_max,
+           s.slug as school_slug, s.name as school
+      from class_offerings c join schools s on s.id = c.school_id
+     where c.status = 'published' and c.registration_mode = 'external'
+     limit 1`;
+  if (!cls) throw new Error("no externally registered class in the catalogue");
+  return cls;
+}
+
+/** A grade this class will accept, so eligibility is not what fails a test. */
+export function okGrade(cls: Pick<TestClass, "grade_min" | "grade_max">): number {
+  return cls.grade_min ?? cls.grade_max ?? 3;
+}
+
+/** A grade this class will refuse, or null when it accepts everybody. */
+export function badGrade(cls: Pick<TestClass, "grade_min" | "grade_max">): number | null {
+  if (cls.grade_max !== null && cls.grade_max < 12) return cls.grade_max + 1;
+  if (cls.grade_min !== null && cls.grade_min > 0) return cls.grade_min - 1;
+  return null;
 }
 
 export function unique(prefix: string) {
@@ -102,19 +143,53 @@ export async function payWithTestCard(page: Page) {
   await page.getByTestId("hosted-payment-submit-button").click();
 }
 
+export type ChildInput = {
+  first: string;
+  last: string;
+  dob: string;
+  /** Left out means "a grade this class accepts". */
+  grade?: number;
+  inCare?: boolean;
+};
+
+/**
+ * Fill the registration form for one child, without submitting.
+ *
+ * Kept separate from registerAndPay so a spec can fill the form and then attack
+ * it: submit twice, tamper with a field, skip the consent.
+ */
+export async function fillRegistration(page: Page, index: number, child: ChildInput, cls: TestClass) {
+  await page.locator(`#fn-${index}`).fill(child.first);
+  await page.locator(`#ln-${index}`).fill(child.last);
+  await page.locator(`#grade-${index}`).selectOption(String(child.grade ?? okGrade(cls)));
+  await fillDate(page, index, child.dob);
+  // Their form requires this before payment, so ours does too.
+  await page.locator(`input[type="checkbox"][required]`).nth(index).check();
+}
+
+/** Tick the policy consent, which is required for every registration. */
+export async function agreeToPolicies(page: Page) {
+  const boxes = page.locator('input[type="checkbox"][required]');
+  const n = await boxes.count();
+  for (let i = 0; i < n; i++) {
+    const box = boxes.nth(i);
+    if (!(await box.isChecked())) await box.check();
+  }
+}
+
 /**
  * Register one child and pay, end to end. Returns the order id.
  * Used by the tests that need a real paid registration to attack.
  */
 export async function registerAndPay(
   page: Page,
-  classId: string,
-  child: { first: string; last: string; dob: string },
+  cls: TestClass,
+  child: ChildInput,
 ) {
-  await page.goto(`/register/${classId}`);
-  await page.locator("#fn-0").fill(child.first);
-  await page.locator("#ln-0").fill(child.last);
-  await fillDate(page, 0, child.dob);
+  await page.goto(`/register/${cls.id}`);
+  await page.locator("#parent-phone").fill("808-555-0100");
+  await fillRegistration(page, 0, child, cls);
+  await agreeToPolicies(page);
   await page.getByRole("button", { name: "Continue to payment" }).click();
   await payWithTestCard(page);
   await page.waitForURL(/\/confirming/, { timeout: 45_000 });
@@ -123,5 +198,34 @@ export async function registerAndPay(
   });
 
   const orderId = new URL(page.url()).searchParams.get("order")!;
-  return { orderId, classId };
+  return { orderId, classId: cls.id };
+}
+
+/**
+ * A registration payload for the API, with everything the schema now requires.
+ * Specs that attack the endpoint start from this and break one field.
+ */
+export function apiRegistration(
+  classOfferingId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    idempotencyKey: unique("api"),
+    agreedToPolicies: true,
+    marketingOptIn: false,
+    registrations: [
+      {
+        classOfferingId,
+        attendsSchoolConfirmed: true,
+        child: {
+          firstName: "Api",
+          lastName: "Child",
+          dateOfBirth: "2016-05-05",
+          grade: 3,
+          inAfterschoolCare: false,
+        },
+      },
+    ],
+    ...overrides,
+  };
 }

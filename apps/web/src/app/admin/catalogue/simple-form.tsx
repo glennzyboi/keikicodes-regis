@@ -65,6 +65,15 @@ function Control({ field, value }: { field: Field; value: string | boolean | nul
   );
 }
 
+/**
+ * One record's form.
+ *
+ * The result stays on screen rather than the panel closing itself. Closing on
+ * success felt tidy and meant somebody who added a campus was told nothing at
+ * all: the panel vanished, the row appeared somewhere in a table of twenty, and
+ * the only way to know it had worked was to go looking. The test caught it,
+ * which is a fair argument for driving the real UI rather than the action.
+ */
 export function RecordForm({
   idField,
   id,
@@ -92,13 +101,7 @@ export function RecordForm({
 
   return (
     <div className="space-y-3">
-      <form
-        action={async (fd) => {
-          await action(fd);
-          onDone?.();
-        }}
-        className="space-y-3"
-      >
+      <form action={action} className="space-y-3">
         {id && <input type="hidden" name={idField} value={id} />}
         <div className="grid gap-3 sm:grid-cols-2">
           {fields.map((f) => (
@@ -115,6 +118,11 @@ export function RecordForm({
             <span className={state.ok ? "ops-ok" : "ops-warn"} role="status">
               {state.ok ? state.message : state.error}
             </span>
+          )}
+          {state?.ok && onDone && (
+            <button type="button" className="ops-btn" onClick={onDone}>
+              Done
+            </button>
           )}
         </div>
       </form>

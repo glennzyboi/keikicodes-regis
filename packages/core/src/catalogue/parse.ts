@@ -331,6 +331,18 @@ function iso(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/** A URL we are willing to put in an href or an img src, or nothing. */
+function webUrl(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseSchool(raw: RawSchool): ParsedSchool {
   const kind = (raw.type ?? "").trim().toLowerCase();
   return {
@@ -338,7 +350,7 @@ export function parseSchool(raw: RawSchool): ParsedSchool {
     slug: slugify(raw.name),
     kind: kind === "public" || kind === "private" || kind === "charter" ? kind : null,
     area: raw.area?.trim() || null,
-    logoUrl: raw.logo?.trim() || null,
+    logoUrl: webUrl(raw.logo),
   };
 }
 
@@ -378,10 +390,18 @@ export function parseOffering(raw: RawProgram): ParsedOffering | null {
   const grades = parseGrades(raw.grades);
   if (grades.problem) problems.push(grades.problem);
 
+  // Their data, rendered into an href. `new URL` accepts "javascript:alert(1)"
+  // quite happily, so the scheme is checked rather than assumed: this string
+  // ends up as a link a parent clicks.
   const url = (raw.registerUrl ?? "").trim();
   let host = "";
   try {
-    host = new URL(url).host.toLowerCase();
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      problems.push(`register link is not a web address: "${url}"`);
+    } else {
+      host = parsed.host.toLowerCase();
+    }
   } catch {
     if (url) problems.push(`unreadable register link "${url}"`);
   }
@@ -407,7 +427,7 @@ export function parseOffering(raw: RawProgram): ParsedOffering | null {
     track,
     subject,
     description: raw.description?.trim() || null,
-    imageUrl: raw.image?.trim() || null,
+    imageUrl: webUrl(raw.image),
 
     schoolName,
     termName: (raw.season ?? "").trim() || "Unscheduled",

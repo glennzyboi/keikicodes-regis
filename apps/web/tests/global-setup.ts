@@ -20,7 +20,7 @@ export default function globalSetup() {
   const require = createRequire(__filename);
   const tsx = path.join(path.dirname(require.resolve("tsx/package.json")), "dist", "cli.mjs");
 
-  execFileSync(process.execPath, [tsx, "--env-file=.env.local", "../../packages/core/scripts/seed.ts"], {
+  execFileSync(process.execPath, [tsx, "--env-file=.env.local", "../../packages/core/scripts/seed.ts", "--snapshot"], {
     cwd: root,
     stdio: "inherit",
   });

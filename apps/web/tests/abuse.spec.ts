@@ -130,22 +130,35 @@ test.describe("injection attempts land as data, not code", () => {
     const email = `${unique("xss")}@example.test`;
     await signUpParent(page, email, "XSS Tester");
 
-    const [cls] = await sql<{ id: string }[]>`
-      select id from class_offerings where seats_taken < capacity limit 1`;
+    // Grade matters now: posting a grade the class does not take is refused
+    // before anything is stored, which would make this test pass for the wrong
+    // reason. Ask the class what it accepts.
+    const [cls] = await sql<{ id: string; grade: number }[]>`
+      select id, coalesce(grade_min, 3) as grade from class_offerings
+       where seats_taken < capacity and registration_mode = 'keiki_coders'
+       limit 1`;
 
     const payload = "<img src=x onerror=alert(1)>";
     const res = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("xss"),
+        agreedToPolicies: true,
         registrations: [
           {
             classOfferingId: cls.id,
-            child: { firstName: payload, lastName: "Escaped", dateOfBirth: "2016-01-01" },
+            attendsSchoolConfirmed: true,
+            child: {
+              firstName: payload,
+              lastName: "Escaped",
+              dateOfBirth: "2016-01-01",
+              grade: cls.grade,
+              inAfterschoolCare: false,
+            },
           },
         ],
       },
     });
-    expect(res.ok()).toBeTruthy();
+    expect(res.ok(), await res.text()).toBeTruthy();
 
     // Render it in the console and prove no element was created from it.
     await page.context().clearCookies();
@@ -164,21 +177,34 @@ test.describe("business rules cannot be bypassed from the API", () => {
   test("a child cannot be registered into two clashing classes", async ({ page }) => {
     await signUpParent(page, `${unique("clash")}@example.test`, "Clash Family");
 
-    const clashing = await sql<{ a: string; b: string }[]>`
-      select a.id as a, b.id as b
+    const clashing = await sql<{ a: string; b: string; grade: number }[]>`
+      select a.id as a, b.id as b,
+             greatest(coalesce(a.grade_min, 0), coalesce(b.grade_min, 0)) as grade
         from class_offerings a join class_offerings b on a.id < b.id
        where classes_clash(a.id, b.id)
+         and a.registration_mode = 'keiki_coders'
+         and b.registration_mode = 'keiki_coders'
+         and a.capacity > a.seats_taken and b.capacity > b.seats_taken
+         and coalesce(a.grade_max, 12) >= coalesce(b.grade_min, 0)
+         and coalesce(b.grade_max, 12) >= coalesce(a.grade_min, 0)
        limit 1`;
 
     test.skip(clashing.length === 0, "no clashing pair in the catalogue");
 
-    const child = { firstName: "Clash", lastName: unique("Kid"), dateOfBirth: "2016-01-01" };
+    const child = {
+      firstName: "Clash",
+      lastName: unique("Kid"),
+      dateOfBirth: "2016-01-01",
+      grade: clashing[0].grade,
+      inAfterschoolCare: false,
+    };
     const res = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("clash"),
+        agreedToPolicies: true,
         registrations: [
-          { classOfferingId: clashing[0].a, child },
-          { classOfferingId: clashing[0].b, child },
+          { classOfferingId: clashing[0].a, attendsSchoolConfirmed: true, child },
+          { classOfferingId: clashing[0].b, attendsSchoolConfirmed: true, child },
         ],
       },
     });
@@ -192,15 +218,24 @@ test.describe("business rules cannot be bypassed from the API", () => {
 
   test("the same child cannot take two seats in one class", async ({ page }) => {
     await signUpParent(page, `${unique("dupe")}@example.test`, "Dupe Family");
-    const [cls] = await sql<{ id: string; seats_taken: number }[]>`
-      select id, seats_taken from class_offerings where capacity - seats_taken > 3 limit 1`;
+    const [cls] = await sql<{ id: string; seats_taken: number; grade_min: number | null }[]>`
+      select id, seats_taken, grade_min from class_offerings
+       where capacity - seats_taken > 3 and registration_mode = 'keiki_coders'
+       limit 1`;
 
-    const child = { firstName: "Twice", lastName: unique("Same"), dateOfBirth: "2016-01-01" };
+    const child = {
+      firstName: "Twice",
+      lastName: unique("Same"),
+      dateOfBirth: "2016-01-01",
+      grade: cls.grade_min ?? 3,
+      inAfterschoolCare: false,
+    };
 
     const first = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("dupe1"),
-        registrations: [{ classOfferingId: cls.id, child }],
+        agreedToPolicies: true,
+        registrations: [{ classOfferingId: cls.id, attendsSchoolConfirmed: true, child }],
       },
     });
     expect(first.ok()).toBeTruthy();
@@ -209,7 +244,8 @@ test.describe("business rules cannot be bypassed from the API", () => {
     const second = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("dupe2"),
-        registrations: [{ classOfferingId: cls.id, child }],
+        agreedToPolicies: true,
+        registrations: [{ classOfferingId: cls.id, attendsSchoolConfirmed: true, child }],
       },
     });
 
@@ -230,17 +266,34 @@ test.describe("business rules cannot be bypassed from the API", () => {
     await signUpParent(page, `${unique("full")}@example.test`, "Full Family");
 
     // Make a class full by hand, then try to take one more.
-    const [cls] = await sql<{ id: string; capacity: number }[]>`
-      select id, capacity from class_offerings order by capacity asc limit 1`;
+    const [cls] = await sql<
+      { id: string; capacity: number; seats_taken: number; grade_min: number | null }[]
+    >`select id, capacity, seats_taken, grade_min from class_offerings
+       where registration_mode = 'keiki_coders'
+       order by capacity asc limit 1`;
+
+    // Remembered, because filling a class by hand breaks the invariant that
+    // seats_taken equals enrollments plus live holds. Leaving it broken made
+    // two later specs fail for reasons that had nothing to do with them, which
+    // is exactly the sort of shared state that makes a suite untrustworthy.
+    const restoreTo = cls.seats_taken;
     await sql`update class_offerings set seats_taken = capacity where id = ${cls.id}`;
 
     const res = await page.request.post("/api/register", {
       data: {
         idempotencyKey: unique("full"),
+        agreedToPolicies: true,
         registrations: [
           {
             classOfferingId: cls.id,
-            child: { firstName: "TooLate", lastName: unique("F"), dateOfBirth: "2016-01-01" },
+            attendsSchoolConfirmed: true,
+            child: {
+              firstName: "TooLate",
+              lastName: unique("F"),
+              dateOfBirth: "2016-01-01",
+              grade: cls.grade_min ?? 3,
+              inAfterschoolCare: false,
+            },
           },
         ],
       },
@@ -254,7 +307,106 @@ test.describe("business rules cannot be bypassed from the API", () => {
       select seats_taken, capacity from class_offerings where id = ${cls.id}`;
     expect(after.seats_taken).toBeLessThanOrEqual(after.capacity);
 
-    await sql`update class_offerings set seats_taken = 0 where id = ${cls.id}`;
+    // Back to what it was, not to zero. Zeroing it was the bug: it threw away
+    // seats that enrollments and holds still pointed at, so the next spec to
+    // look at that class found a count that could not be reconciled.
+    await sql`update class_offerings set seats_taken = ${restoreTo} where id = ${cls.id}`;
+  });
+});
+
+test.describe("a family cannot reach another family's things", () => {
+  test("a photograph belonging to someone else is refused", async ({ page }) => {
+    // The object key is "<parent id>/<file>", and storage enforces that on the
+    // way in. Nothing enforced it on the way back, so a parent could put
+    // another family's key in the payload and their child's record would point
+    // at a photograph of somebody else's child, which staff would then open.
+    const email = `${unique("photo")}@example.test`;
+    await signUpParent(page, email, "Photo Thief");
+
+    const [{ id: mine }] = await sql<{ id: string }[]>`
+      select id from parents where email = ${email}`;
+    const [victim] = await sql<{ id: string }[]>`
+      select id from parents where email <> ${email} limit 1`;
+
+    const [cls] = await sql<{ id: string; grade: number }[]>`
+      select id, coalesce(grade_min, 3) as grade from class_offerings
+       where registration_mode = 'keiki_coders' and seats_taken < capacity limit 1`;
+
+    const attempt = (photoPath: string) =>
+      page.request.post("/api/register", {
+        data: {
+          idempotencyKey: unique("photo"),
+          agreedToPolicies: true,
+          registrations: [
+            {
+              classOfferingId: cls.id,
+              attendsSchoolConfirmed: true,
+              child: {
+                firstName: "Photo",
+                lastName: unique("P").replace(/-/g, ""),
+                dateOfBirth: "2016-01-01",
+                grade: cls.grade,
+                inAfterschoolCare: false,
+                photoPath,
+              },
+            },
+          ],
+        },
+      });
+
+    if (victim) {
+      const stolen = await attempt(`${victim.id}/somebody-elses-child.jpg`);
+      expect(stolen.ok(), "another family's photo is refused").toBeFalsy();
+      expect(stolen.status()).toBeLessThan(500);
+    }
+
+    // Traversal and schemes do not get past the shape check either.
+    for (const bad of [
+      "../../etc/passwd",
+      `${mine}/../${victim?.id ?? mine}/x.jpg`,
+      "https://evil.example/x.jpg",
+      "child-photos/x.jpg",
+    ]) {
+      const res = await attempt(bad);
+      expect(res.ok(), `"${bad}" must be refused`).toBeFalsy();
+      expect(res.status(), `"${bad}" is a refusal, not a crash`).toBeLessThan(500);
+    }
+
+    // And the family's own key is accepted, so the rule is a boundary rather
+    // than a blanket no.
+    const ok = await attempt(`${mine}/my-own-child.jpg`);
+    expect(ok.ok(), await ok.text()).toBeTruthy();
+
+    const [child] = await sql<{ photo_path: string }[]>`
+      select photo_path from children where parent_id = ${mine} limit 1`;
+    expect(child.photo_path).toBe(`${mine}/my-own-child.jpg`);
+  });
+
+  test("a link in imported data can only ever be http or https", async () => {
+    // Their register links are rendered into an href a parent clicks. new URL()
+    // accepts "javascript:alert(1)" quite happily, so the scheme is checked.
+    const { parseOffering } = await import("@keiki/core/catalogue/parse");
+
+    const hostile = parseOffering({
+      name: "Hostile",
+      grades: "1-3",
+      season: "Fall 2026",
+      site: "Somewhere",
+      location: null,
+      days: "Tuesday",
+      time: "3:00-4:00",
+      dates: "Sep 1, 2026 - Oct 27, 2026",
+      cost: null,
+      sessions: null,
+      image: "javascript:alert(1)",
+      specialNotes: null,
+      description: null,
+      registerUrl: "javascript:alert(1)",
+      noClass: null,
+    })!;
+
+    expect(hostile.imageUrl, "a javascript: image is dropped").toBeNull();
+    expect(hostile.problems.join(" ")).toMatch(/not a web address/);
   });
 });
 

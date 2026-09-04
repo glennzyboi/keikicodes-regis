@@ -24,13 +24,14 @@
  * removed, which is exactly the behaviour you want from a system of record for
  * money.
  */
-import postgres from "postgres";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+// The shared client, not a second one. This script used to open its own while
+// the importer used core's, so sql.end() closed the wrong pool and the process
+// hung after printing "Done". It cost a ten minute test run to find.
+import { sql } from "../src/db";
 import { importCatalogue } from "../src/catalogue/import";
 import { chooseSource, printReport } from "./import-catalogue";
-
-const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2026-08-26.dahlia",
 });
@@ -93,6 +94,16 @@ async function main() {
             notifications, support_notes
             restart identity cascade`;
   await sql`update class_offerings set seats_taken = 0`;
+
+  // Sessions somebody cancelled or rescheduled by hand are family-facing
+  // decisions, and generate_sessions deliberately preserves them. That is right
+  // in production and wrong in a seed, whose whole job is a known state, so
+  // they are cleared here and only here. Without this, two seed runs produce
+  // different session counts and nobody can tell why.
+  await sql`delete from sessions where origin = 'manual'`;
+  await sql`update sessions set status = 'scheduled', note = null,
+                                from_blackout = false, rescheduled_from = null
+             where status <> 'scheduled' or note is not null`;
 
   console.log("Importing their catalogue...");
   const source = await chooseSource(!useSnapshot);

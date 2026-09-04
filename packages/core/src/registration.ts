@@ -30,7 +30,18 @@ const ChildInput = z.object({
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   grade: Grade,
   notes: z.string().max(1000).optional().nullable(),
-  photoPath: z.string().max(400).optional().nullable(),
+  // Checked against the signed in parent below, not trusted from here. The
+  // shape check is a first gate: an object key is "<parent id>/<file>", so
+  // anything with a traversal segment or a scheme in it is refused outright.
+  photoPath: z
+    .string()
+    .max(400)
+    .regex(
+      /^[0-9a-f-]{36}\/[A-Za-z0-9._-]{1,200}$/,
+      "That is not a photo we stored",
+    )
+    .optional()
+    .nullable(),
   inAfterschoolCare: z.boolean().optional().default(false),
   afterschoolCareProgram: z.string().max(60).optional().nullable(),
 });
@@ -183,6 +194,20 @@ export async function createPendingOrder(
         }
       }
       const byId = new Map(classes.map((c) => [c.id, c]));
+
+      // 3c. A photograph belongs to the family that uploaded it.
+      //
+      //     The object key is "<parent id>/<file>", and storage enforces that
+      //     on write. Nothing enforced it here, so a parent could put another
+      //     family's key in the payload and their child's record would point at
+      //     a photograph of somebody else's child, which staff would then open.
+      //     One string comparison, and the whole class of problem is gone.
+      for (const r of input.registrations) {
+        const path = r.child.photoPath;
+        if (path && !path.startsWith(`${parent.id}/`)) {
+          return { ok: false as const, reason: "class_not_available" as const };
+        }
+      }
 
       // 4. Resolve each child.
       //

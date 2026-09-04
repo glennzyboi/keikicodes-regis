@@ -47,7 +47,12 @@ export type OfferingOutcome = {
   school: string;
   term: string;
   action: "created" | "updated" | "unchanged";
-  sessionsGenerated: number;
+  /** What the schedule produces: weekday occurrences in range, minus holidays. */
+  sessionsScheduled: number;
+  /** How many of those are currently running, after any staff cancellations. */
+  sessionsRunning: number;
+  /** Sessions a person cancelled. A legitimate difference, not a mismatch. */
+  staffCancelled: number;
   sessionsStated: number | null;
   reconciles: boolean;
   problems: string[];
@@ -370,12 +375,32 @@ async function upsertOffering(
   const [gen] = await tx<{ scheduled: number; cancelled: number; removed: number }[]>`
     select * from generate_sessions(${row.id})`;
 
+  // What the schedule produces, worked out independently of the database so
+  // the two can be compared rather than one trusted.
   const expected = countSessions(
     o.firstSessionDate,
     o.lastSessionDate,
     o.weekday,
     o.blackoutDates,
   );
+
+  /**
+   * Sessions a person cancelled, which are not a holiday and not a mistake.
+   *
+   * This distinction cost a real bug. The check used to compare the number of
+   * sessions currently running against the number they publish, so the moment
+   * the office cancelled one afternoon for a sick teacher, the next import
+   * reported that three schedules "do not reconcile" and asked somebody to
+   * investigate a decision they had made themselves the week before. An alert
+   * that fires on correct behaviour is an alert people learn to ignore.
+   *
+   * So the comparison is against what the schedule produces, and staff
+   * cancellations are counted and reported separately.
+   */
+  const [{ n: staffCancelled }] = await tx<{ n: number }[]>`
+    select count(*)::int as n from sessions
+     where class_offering_id = ${row.id}
+       and status = 'cancelled' and not from_blackout`;
 
   if (!before) report.needCapacity.push(`${o.title} at ${o.schoolName}`);
 
@@ -385,13 +410,16 @@ async function upsertOffering(
     school: o.schoolName,
     term: o.termName,
     action: before ? "updated" : "created",
-    sessionsGenerated: gen.scheduled,
+    sessionsScheduled: gen.scheduled + staffCancelled,
+    sessionsRunning: gen.scheduled,
+    staffCancelled,
     sessionsStated: o.statedSessions,
-    // Two checks in one: our generator agrees with our own arithmetic, and both
-    // agree with what they publish. Either disagreement is worth a human.
+    // Two checks in one: the schedule the database holds agrees with our own
+    // arithmetic, and both agree with what they publish. Either disagreement is
+    // worth a human; a cancellation somebody made on purpose is not.
     reconciles:
-      gen.scheduled === expected &&
-      (o.statedSessions == null || o.statedSessions === gen.scheduled),
+      gen.scheduled + staffCancelled === expected &&
+      (o.statedSessions == null || o.statedSessions === expected),
     problems: o.problems,
   };
 }

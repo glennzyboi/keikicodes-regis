@@ -7,7 +7,10 @@ import {
   signInStaff,
   registerAndPay,
   fillDate,
+  fillRegistration,
+  agreeToPolicies,
   freeClass,
+  externalClass,
 } from "./helpers";
 
 /**
@@ -80,7 +83,9 @@ test.describe("browsing and registering", () => {
     // A class with room, so the detail carries a register link rather than the
     // disabled state a full class shows.
     const open = await freeClass(1);
-    await page.goto("/");
+    // Cards live on the campus page now. The front door asks which school
+    // first, because that is the only thing a parent arrives knowing.
+    await page.goto(`/schools/${open.school_slug}`);
 
     const card = page.locator(".exp-card", { hasText: open.title }).first();
     const summary = card.locator(".exp-card-summary");
@@ -96,10 +101,25 @@ test.describe("browsing and registering", () => {
   });
 
   test("the seat counts on the page match the database", async ({ page }) => {
-    await page.goto("/");
+    // One campus, every class on it. Checking all fifteen campuses would be
+    // fifteen page loads to prove the same thing once.
+    const [campus] = await sql<{ slug: string }[]>`
+      select s.slug
+        from class_offerings c join schools s on s.id = c.school_id
+       where c.status = 'published' and c.registration_mode = 'keiki_coders'
+       group by s.slug
+       order by count(*) desc
+       limit 1`;
+
+    await page.goto(`/schools/${campus.slug}`);
 
     const classes = await sql<{ title: string; capacity: number; seats_taken: number }[]>`
-      select title, capacity, seats_taken from class_offerings where status = 'published'`;
+      select c.title, c.capacity, c.seats_taken
+        from class_offerings c join schools s on s.id = c.school_id
+       where c.status = 'published' and s.slug = ${campus.slug}
+         and c.registration_mode = 'keiki_coders'`;
+
+    expect(classes.length, "the campus has classes to check").toBeGreaterThan(0);
 
     for (const c of classes) {
       const left = c.capacity - c.seats_taken;
@@ -114,15 +134,55 @@ test.describe("browsing and registering", () => {
     }
   });
 
+  test("a class the school enrols has no way to pay for it here", async ({ page }) => {
+    const ext = await externalClass();
+    await page.goto(`/schools/${ext.school_slug}`);
+
+    const card = page.locator(".exp-card", { hasText: ext.title }).first();
+    await card.locator(".exp-card-summary").click();
+
+    // No Register button anywhere on it, and a link to the school instead.
+    await expect(card.getByRole("link", { name: /^Register for/ })).toHaveCount(0);
+    await expect(card.getByText("Enrolled through the school")).toBeVisible();
+    await expect(card.getByRole("link", { name: new RegExp(`Register at`) })).toBeVisible();
+
+    // And walking straight to the registration URL says so rather than 404ing
+    // or, worse, taking a payment.
+    await signUpParent(page, `${unique("ext")}@example.test`, "External Family");
+    await page.goto(`/register/${ext.id}`);
+    await expect(page.getByText(/takes registrations for this class/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continue to payment/ })).toHaveCount(0);
+  });
+
   test("add another class is optional, and clashing classes are disabled", async ({ page }) => {
     await signUpParent(page, `${unique("optional")}@example.test`);
 
-    const clashing = await sql<{ a: string; b_title: string }[]>`
-      select a.id as a, b.title as b_title
-        from class_offerings a join class_offerings b on a.id <> b.id
-       where classes_clash(a.id, b.id)
-       limit 1`;
-    test.skip(clashing.length === 0, "no clashing pair");
+    // Their real catalogue happens to have no two sellable classes clashing at
+    // one campus, so the pair is built rather than hoped for. This used to
+    // skip, which meant the feature went unproven every single run while the
+    // suite reported green.
+    const base = await freeClass(1);
+    const [ctx] = await sql<{ school_id: string; program_id: string; term_id: string }[]>`
+      select school_id, program_id, term_id from class_offerings where id = ${base.id}`;
+
+    const clashTitle = unique("Overlapping").replace(/-/g, " ");
+    const [other] = await sql<{ id: string }[]>`
+      insert into class_offerings
+        (school_id, program_id, term_id, title, weekday, start_time, end_time,
+         first_session_date, last_session_date, capacity, price_cents,
+         status, registration_opens_at, registration_mode)
+      select school_id, program_id, term_id, ${clashTitle},
+             weekday, start_time + interval '15 minutes', end_time + interval '15 minutes',
+             first_session_date, last_session_date, 10, 30000,
+             'published', now() - interval '1 day', 'keiki_coders'
+        from class_offerings where id = ${base.id}
+      returning id`;
+    await sql`select * from generate_sessions(${other.id})`;
+
+    const clashing = [{ a: base.id, b_title: clashTitle }];
+    const [{ really }] = await sql<{ really: boolean }[]>`
+      select classes_clash(${base.id}, ${other.id}) as really`;
+    expect(really, "the pair really does overlap").toBe(true);
 
     await page.goto(`/register/${clashing[0].a}`);
 
@@ -137,6 +197,8 @@ test.describe("browsing and registering", () => {
     const clashRow = disclosure.locator("label", { hasText: clashing[0].b_title });
     await expect(clashRow.locator("input[type=checkbox]")).toBeDisabled();
     await expect(clashRow.getByText(/clashes with this class/)).toBeVisible();
+
+    await sql`delete from class_offerings where id = ${other.id}`;
   });
 
   test("the date field keeps partial input and clamps impossible days", async ({ page }) => {
@@ -172,13 +234,11 @@ test.describe("the portal", () => {
     const cls = await freeClass(2);
 
     await page.goto(`/register/${cls.id}`);
-    await page.locator("#fn-0").fill("Alpha");
-    await page.locator("#ln-0").fill("Portal");
-    await fillDate(page, 0, "2016-01-01");
+    await page.locator("#parent-phone").fill("808-555-0111");
+    await fillRegistration(page, 0, { first: "Alpha", last: "Portal", dob: "2016-01-01" }, cls);
     await page.getByRole("button", { name: "Add another child" }).click();
-    await page.locator("#fn-1").fill("Beta");
-    await page.locator("#ln-1").fill("Portal");
-    await fillDate(page, 1, "2018-01-01");
+    await fillRegistration(page, 1, { first: "Beta", last: "Portal", dob: "2018-01-01" }, cls);
+    await agreeToPolicies(page);
 
     await page.getByRole("button", { name: "Continue to payment" }).click();
     await page.waitForURL(/checkout\.stripe\.com/, { timeout: 45_000 });
@@ -230,7 +290,7 @@ test.describe("the portal", () => {
     const email = `${unique("cancel")}@example.test`;
     await signUpParent(page, email, "Cancel Family");
     const target = await freeClass(1);
-    const { classId } = await registerAndPay(page, target.id, {
+    const { classId } = await registerAndPay(page, target, {
       first: "Cancelme",
       last: unique("Kid").replace(/-/g, ""),
       dob: "2015-05-05",
@@ -276,7 +336,7 @@ test.describe("the full money lifecycle", () => {
 
     // 1. Register and pay.
     const cycleClass = await freeClass(1);
-    const { classId } = await registerAndPay(page, cycleClass.id, {
+    const { classId } = await registerAndPay(page, cycleClass, {
       first: "Cycle",
       last: unique("Kid").replace(/-/g, ""),
       dob: "2014-09-09",

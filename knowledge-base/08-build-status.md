@@ -154,7 +154,7 @@ registration/src/lib/       db.ts schema.ts stripe.ts portal-token.ts registrati
 registration/src/app/       layout.tsx globals.css page.tsx confirming/page.tsx
                             register/[id]/page.tsx  register/[id]/register-form.tsx
 registration/src/app/api/   register/route.ts  stripe/webhook/route.ts  orders/[id]/route.ts
-registration/scripts/       seed.ts  probe-checkout.ts (throwaway diagnostic)
+registration/scripts/       seed.ts
 registration/tests/         registration.spec.ts
 ```
 
@@ -162,53 +162,64 @@ registration/tests/         registration.spec.ts
 
 ## WHERE IT STOPPED, AND WHAT TO DO NEXT
 
-**Current state: the two Playwright specs are failing.** Be careful reading this,
-it is not one problem.
+**Both Playwright specs now pass, and the payment path has run end to end for
+the first time.** Before this, `webhook_events` had never contained a single row
+and no order had ever reached `paid`.
 
-1. **The payment spec** originally failed because Stripe's hosted page has a
-   **required email field** that was never filled, so submit did nothing. Diagnosed
-   with `scripts/probe-checkout.ts`, which dumps the real inputs on the hosted page.
-   Fixed two ways: `customer_email` is now passed when creating the session so
-   Stripe prefills it, and the spec fills it as a fallback.
+Two real bugs were found and fixed to get there. Both are worth mentioning on
+camera, because both are the kind of thing the client is actually asking about.
 
-2. **Adaptive pricing was showing pesos.** The hosted page offered
-   `₱21,417.58 / $330.00` because the browser is in Manila. Now disabled with
-   `adaptive_pricing: { enabled: false }` in the session, so the demo charges the
-   USD amount the parent agreed to.
+**1. Stripe's hosted checkout changed shape.** It now renders payment methods as
+an accordion with nothing selected, so the card fields do not exist in the DOM
+at all until Card is chosen. The old spec typed straight into a card field that
+was never there. The card row is covered by a full-row click overlay that
+reports itself as offscreen, so clicking the row does not work either. What
+works:
 
-3. **After those two fixes both specs failed**, including the idempotency one that
-   had passed on the previous run. That regression is the thing to look at first.
-   Leading hypothesis: the dev server was still recompiling after the route edit
-   when the run started, so the first requests 500'd. Second hypothesis: seats in
-   `Python Starters` and `Scratch Adventures` have accumulated across runs and a
-   class is now full, which the specs do not reset.
+```ts
+await page.getByRole("radio", { name: "Card" }).check({ force: true });
+```
 
-   **Do this first: reseed, confirm the server is warm, then rerun.**
+That mounts `#cardNumber`, `#cardExpiry`, `#cardCvc` and `#billingName` into the
+main frame, no iframe involved. Email is no longer an input at all: it is passed
+as `customer_email` when the session is created and rendered as read-only text.
 
-   ```bash
-   cd registration
-   ./node_modules/.bin/tsx --env-file=.env.local scripts/seed.ts
-   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/
-   set -a; . ./.env.local; set +a
-   ./node_modules/.bin/playwright test
-   ```
+**2. A double-clicked submit could 500, and this one was a genuine defect, not a
+test problem.** Two concurrent requests for the same order both reached Stripe
+with idempotency key `checkout:<order id>`, and Stripe rejects concurrent use of
+an in-progress key. The parent saw a 500 despite doing nothing wrong.
 
-   Traces and video are kept on failure in `registration/test-results/`.
+The database work was already safe: the parent upsert in step 1 of
+`createPendingOrder` takes a row lock on the parent, which serialises the two
+transactions, so the order insert can never collide. The unsafe part was the
+Stripe call, which happens after that transaction commits.
+
+Fixed by serialising the checkout-session work per order with `select ... for
+update` on the order row, in `src/app/api/register/route.ts`. The second request
+blocks, then finds `stripe_checkout_session_id` already set and reuses the same
+session. The lock is one order row, so it never blocks another family.
+
+Verified after the fix: order `paid`, `fulfilled_at` set, 2 enrollments, holds
+consumed, seats moved by exactly 2, and the one leftover hold belongs to the
+deliberately unpaid idempotency order.
 
 **Still to build, in priority order:**
 
-1. `/portal` page, reading the signed token, listing registrations, request a
-   cancellation. `portal-token.ts` is written and ready.
-2. `/admin`: paid-but-unfulfilled orders, expiring holds, approve a cancellation.
-   Staff login exists and RLS policies are in place.
-3. Session cancel and reschedule, and mid-semester join, in admin.
-4. `scripts/sweep-holds.ts`, calling `release_expired_holds()`. The SQL function
+1. `scripts/sweep-holds.ts`, calling `release_expired_holds()`. The SQL function
    already exists and works; the script does not exist yet, and `pnpm sweep` in
-   package.json points at it.
-5. `scripts/thunder.ts`, the 50-against-12 concurrency proof. **This is the single
-   most valuable remaining item**, because it answers their hardest question on
+   package.json points at it. There is a real expired-hold sitting in the
+   database right now to demonstrate against.
+2. `scripts/thunder.ts`, the 50-against-12 concurrency proof. **The single most
+   valuable remaining item**, because it answers their hardest question on
    camera. The plan document has the script sketched.
+3. `/portal` page, reading the signed token, listing registrations, request a
+   cancellation. `portal-token.ts` is written and ready.
+4. `/admin`: paid-but-unfulfilled orders, expiring holds, approve a cancellation.
+   Staff login exists and RLS policies are in place.
+5. Session cancel and reschedule, and mid-semester join, in admin.
 6. Record the Loom. Script is in `../keiki-build-plan.html` section 08.
+
+Traces and video are kept on failure in `registration/test-results/`.
 
 ---
 

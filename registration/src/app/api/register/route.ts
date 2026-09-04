@@ -39,69 +39,75 @@ export async function POST(req: Request) {
     return NextResponse.json(result, { status: 409 });
   }
 
-  // If this order already has a live checkout session, hand the same one back
-  // rather than creating a second. Stripe would happily create two.
-  const [order] = await sql<
-    { id: string; amount_cents: number; stripe_checkout_session_id: string | null; status: string }[]
-  >`select id, amount_cents, stripe_checkout_session_id, status
-      from orders where id = ${result.orderId}`;
+  // Everything below is serialised per order with a row lock.
+  //
+  // Without it, a double-clicked submit puts two requests on the same order at
+  // the same time, both reach Stripe with idempotency key `checkout:<order>`,
+  // and Stripe rejects the second with "another in-progress request is using
+  // this idempotent key". That surfaces as a 500 to a parent who did nothing
+  // wrong. The lock is on a single order row, so it never blocks another family.
+  const checkout = await sql.begin(async (tx) => {
+    const [order] = await tx<
+      { id: string; stripe_checkout_session_id: string | null; status: string }[]
+    >`select id, stripe_checkout_session_id, status
+        from orders where id = ${result.orderId}
+        for update`;
 
-  if (order.status === "paid") {
-    return NextResponse.json({ orderId: order.id, alreadyPaid: true });
-  }
-
-  if (order.stripe_checkout_session_id) {
-    const existing = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id);
-    if (existing.status === "open" && existing.url) {
-      return NextResponse.json({ orderId: order.id, checkoutUrl: existing.url, reused: true });
+    if (order.status === "paid") {
+      return { orderId: order.id, alreadyPaid: true as const };
     }
-  }
 
-  const [payer] = await sql<{ email: string }[]>`
-    select p.email from parents p
-      join orders o on o.parent_id = p.id
-     where o.id = ${order.id}`;
+    // Whoever got the lock first has already stored a session. Hand back the
+    // same one rather than creating a second checkout for the same order.
+    if (order.stripe_checkout_session_id) {
+      const existing = await stripe.checkout.sessions.retrieve(
+        order.stripe_checkout_session_id,
+      );
+      if (existing.status === "open" && existing.url) {
+        return { orderId: order.id, checkoutUrl: existing.url, reused: true };
+      }
+    }
 
-  const items = await sql<
-    { stripe_price_id: string | null; unit_price_cents: number; title: string; child: string }[]
-  >`select oi.stripe_price_id, oi.unit_price_cents, c.title,
-           ch.first_name || ' ' || ch.last_name as child
-      from order_items oi
-      join class_offerings c on c.id = oi.class_offering_id
-      join children ch on ch.id = oi.child_id
-     where oi.order_id = ${order.id}`;
+    const [payer] = await tx<{ email: string }[]>`
+      select p.email from parents p
+        join orders o on o.parent_id = p.id
+       where o.id = ${order.id}`;
 
-  const appUrl = process.env.APP_URL ?? "http://localhost:3000";
+    const items = await tx<{ stripe_price_id: string | null }[]>`
+      select oi.stripe_price_id
+        from order_items oi
+       where oi.order_id = ${order.id}`;
 
-  // Line items are built here, on the server, from Stripe price ids we stored
-  // when the class was created. Nothing the browser sent can influence what is
-  // charged. This is the single most important line in the payment path.
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "payment",
-      line_items: items.map((i) => ({ price: i.stripe_price_id!, quantity: 1 })),
-      client_reference_id: order.id,
-      // They already typed it on our form; do not make them type it again.
-      customer_email: payer.email,
-      // The classes are priced in USD by a Hawaii business. Adaptive pricing
-      // would offer a Manila browser the peso equivalent, which is a different
-      // amount from the one the parent agreed to on our own page.
-      adaptive_pricing: { enabled: false },
-      metadata: { order_id: order.id },
-      success_url: `${appUrl}/confirming?order=${order.id}`,
-      cancel_url: `${appUrl}/?cancelled=${order.id}`,
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-    },
-    // A retried API call returns the same session instead of a second charge.
-    { idempotencyKey: `checkout:${order.id}` },
-  );
+    const appUrl = process.env.APP_URL ?? "http://localhost:3000";
 
-  await sql`update orders set stripe_checkout_session_id = ${session.id}
-             where id = ${order.id}`;
+    // Line items are built here, on the server, from Stripe price ids we stored
+    // when the class was created. Nothing the browser sent can influence what is
+    // charged. This is the single most important line in the payment path.
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: items.map((i) => ({ price: i.stripe_price_id!, quantity: 1 })),
+        client_reference_id: order.id,
+        // They already typed it on our form; do not make them type it again.
+        customer_email: payer.email,
+        // The classes are priced in USD by a Hawaii business. Adaptive pricing
+        // would offer a Manila browser the peso equivalent, which is a different
+        // amount from the one the parent agreed to on our own page.
+        adaptive_pricing: { enabled: false },
+        metadata: { order_id: order.id },
+        success_url: `${appUrl}/confirming?order=${order.id}`,
+        cancel_url: `${appUrl}/?cancelled=${order.id}`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      },
+      // A retried API call returns the same session instead of a second charge.
+      { idempotencyKey: `checkout:${order.id}` },
+    );
 
-  return NextResponse.json({
-    orderId: order.id,
-    checkoutUrl: session.url,
-    reused: result.reused,
+    await tx`update orders set stripe_checkout_session_id = ${session.id}
+              where id = ${order.id}`;
+
+    return { orderId: order.id, checkoutUrl: session.url, reused: result.reused };
   });
+
+  return NextResponse.json(checkout);
 }

@@ -11,18 +11,25 @@ function unique(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
 
-/** Stripe's hosted checkout, paid with the standard test card. */
+/**
+ * Stripe's hosted checkout, paid with the standard test card.
+ *
+ * The hosted page presents payment methods as an accordion with nothing
+ * selected, so the card fields do not exist in the DOM until Card is chosen.
+ * The radio sits under a full-row click overlay that reports itself as
+ * offscreen, so check it directly rather than clicking the row.
+ *
+ * Email is not an input here: it is passed as customer_email when the session
+ * is created, and the hosted page renders it as read-only text.
+ */
 async function payWithTestCard(page: Page) {
   await page.waitForURL(/checkout\.stripe\.com/, { timeout: 45_000 });
 
-  // Email is prefilled from our own form, but fill it if Stripe asks anyway.
-  const email = page.locator("#email");
-  if (await email.isVisible().catch(() => false)) {
-    const current = await email.inputValue();
-    if (!current) await email.fill("checkout@example.test");
-  }
+  await page.getByRole("radio", { name: "Card" }).check({ force: true });
+  const cardNumber = page.getByPlaceholder("1234 1234 1234 1234");
+  await expect(cardNumber).toBeVisible();
 
-  await page.getByPlaceholder("1234 1234 1234 1234").fill("4242424242424242");
+  await cardNumber.fill("4242424242424242");
   await page.getByPlaceholder("MM / YY").fill("12/30");
   await page.getByPlaceholder("CVC").fill("123");
 

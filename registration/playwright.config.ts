@@ -13,6 +13,7 @@ export default defineConfig({
   testDir: "./tests",
   // Reseed first, so a run never inherits the state of the run before it.
   globalSetup: "./tests/global-setup.ts",
+  globalTeardown: "./tests/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,

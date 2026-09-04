@@ -56,10 +56,19 @@ export type Parent = {
  * a row yet" checks through the app, the row is created the first time we see
  * them, keyed on the auth user id.
  *
- * The email conflict branch matters. A family may already exist in our records
- * from before accounts, or from a guest registration, and the natural key for a
- * person is their email address. Signing up with that address should claim that
- * record rather than create a second one, which would split a family in two.
+ * Three things this has to get right, all of which it got wrong first time.
+ *
+ * 1. A staff account is not a family. Both sides share one Supabase session, so
+ *    a staff member who walks to /portal was being turned into a parent, which
+ *    put the office email in the families list. They are told no instead.
+ *
+ * 2. The common path is a read. Looking up by auth_user_id first means an
+ *    ordinary page view does not write to the database at all.
+ *
+ * 3. Two renders can race. The layout and the page both resolve the parent, so
+ *    the insert has to survive losing that race: a unique violation means
+ *    somebody else just created the row, which is a success, not an error.
+ *    Previously it surfaced as a 500.
  */
 export async function currentParent(): Promise<Parent | null> {
   const supabase = await supabaseParent();
@@ -68,30 +77,51 @@ export async function currentParent(): Promise<Parent | null> {
   } = await supabase.auth.getUser();
   if (!user?.email) return null;
 
+  // Staff are not families. One session covers both sides of the app, so
+  // without this the office account acquires a parents row by browsing.
+  const [isStaff] = await sql<{ id: string }[]>`
+    select id from staff where auth_user_id = ${user.id}`;
+  if (isStaff) return null;
+
   const email = user.email.trim().toLowerCase();
   const name =
     (user.user_metadata?.full_name as string) ??
     (user.user_metadata?.name as string) ??
     email.split("@")[0];
 
+  const existing = await findParent(user.id);
+  if (existing) return existing;
+
+  try {
+    // Claim a record that already exists under this address, which is how a
+    // family who registered before accounts keeps their history instead of
+    // being split in two. coalesce refuses to steal one that already belongs
+    // to a different account.
+    await sql`
+      insert into parents (auth_user_id, email, full_name)
+      values (${user.id}, ${email}, ${name})
+      on conflict (email) do update
+        set auth_user_id = coalesce(parents.auth_user_id, excluded.auth_user_id)`;
+  } catch {
+    // Lost a race with another render, or the address belongs to a different
+    // account. Both are answered by reading back what is actually there.
+  }
+
+  return findParent(user.id);
+}
+
+/** Read the parents row belonging to this auth user, or null. */
+async function findParent(authUserId: string): Promise<Parent | null> {
   const [row] = await sql<
     { id: string; email: string; full_name: string; phone: string | null }[]
-  >`
-    insert into parents (auth_user_id, email, full_name)
-    values (${user.id}, ${email}, ${name})
-    on conflict (email) do update
-      set auth_user_id = coalesce(parents.auth_user_id, excluded.auth_user_id)
-    returning id, email, full_name, phone`;
+  >`select id, email, full_name, phone
+      from parents where auth_user_id = ${authUserId}`;
 
-  // The coalesce above refuses to steal a record that already belongs to a
-  // different account. If that happened, this is not their family.
-  const [check] = await sql<{ auth_user_id: string | null }[]>`
-    select auth_user_id from parents where id = ${row.id}`;
-  if (check.auth_user_id !== user.id) return null;
+  if (!row) return null;
 
   return {
     id: row.id,
-    authUserId: user.id,
+    authUserId,
     email: row.email,
     fullName: row.full_name,
     phone: row.phone,

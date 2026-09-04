@@ -3,10 +3,6 @@ import postgres from "postgres";
 
 const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
 
-test.afterAll(async () => {
-  await sql.end();
-});
-
 function unique(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
@@ -95,13 +91,19 @@ test("a parent registers two children, pays, and the webhook confirms it", async
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /register your keiki/i })).toBeVisible();
 
-  // Register into the class the brief describes: Tuesdays 3 to 4pm, 12 seats.
+  // A class with room for both children. Hardcoding a title would inherit
+  // whatever the specs before this one did to that class.
+  const [target] = await sql<{ title: string }[]>`
+    select title from class_offerings
+     where status = 'published' and capacity - seats_taken >= 2
+     order by capacity - seats_taken desc limit 1`;
+
   // The card opens to reveal the full detail and the register link, so the
   // spec goes through the same disclosure a parent does.
-  const card = page.locator(".exp-card", { hasText: "Scratch Adventures" }).first();
+  const card = page.locator(".exp-card", { hasText: target.title }).first();
   await card.locator(".exp-card-summary").click();
   await card.getByRole("link", { name: /Register for/ }).click();
-  await expect(page.getByRole("heading", { name: "Scratch Adventures" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: target.title })).toBeVisible();
 
   await page.getByLabel("First name").fill("Noa");
   await page.getByLabel("Last name").fill(lastName);
@@ -114,7 +116,7 @@ test("a parent registers two children, pays, and the webhook confirms it", async
   await fillDate(page, 1, "2019-08-11");
 
   const before = await sql<{ seats_taken: number }[]>`
-    select seats_taken from class_offerings where title = 'Scratch Adventures'`;
+    select seats_taken from class_offerings where title = ${target.title}`;
 
   await page.getByRole("button", { name: "Continue to payment" }).click();
   await payWithTestCard(page);
@@ -141,7 +143,7 @@ test("a parent registers two children, pays, and the webhook confirms it", async
 
   // Seats moved by exactly two, and the holds were consumed rather than left behind.
   const after = await sql<{ seats_taken: number }[]>`
-    select seats_taken from class_offerings where title = 'Scratch Adventures'`;
+    select seats_taken from class_offerings where title = ${target.title}`;
   expect(after[0].seats_taken).toBe(before[0].seats_taken + 2);
 
   const holds = await sql<{ n: number }[]>`
@@ -166,7 +168,9 @@ test("submitting the same registration twice creates one order, not two", async 
   await signUp(page, email, "Double Clicker");
 
   const [cls] = await sql<{ id: string }[]>`
-    select id from class_offerings where title = 'Python Starters'`;
+    select id from class_offerings
+     where status = 'published' and capacity - seats_taken >= 1
+     order by capacity - seats_taken desc limit 1`;
 
   const payload = {
     idempotencyKey: unique("idem"),
@@ -213,7 +217,7 @@ test("submitting the same registration twice creates one order, not two", async 
 
 test("a signed out request cannot register anyone", async ({ request }) => {
   const [cls] = await sql<{ id: string }[]>`
-    select id from class_offerings where title = 'Minecraft Modding'`;
+    select id from class_offerings limit 1`;
 
   const res = await request.post("/api/register", {
     data: {

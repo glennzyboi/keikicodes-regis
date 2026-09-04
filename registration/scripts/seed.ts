@@ -175,12 +175,22 @@ async function ensureAuthUser(
   password: string,
   metadata: Record<string, unknown>,
 ) {
-  const { data: existing } = await admin.auth.admin.listUsers();
-  const found = existing?.users.find((u) => u.email === email);
+  // Looked up in the database rather than with listUsers().
+  //
+  // listUsers is paginated and defaults to the first fifty. Once a machine has
+  // run the test suite a few times there are more auth users than that, the
+  // staff account falls off page one, and the seed tries to create an account
+  // that already exists and fails. Asking Postgres directly is exact and does
+  // not care how many users there are.
+  const [existing] = await sql<{ id: string }[]>`
+    select id from auth.users where lower(email) = ${email.toLowerCase()}`;
 
-  if (found) {
-    await admin.auth.admin.updateUserById(found.id, { password, user_metadata: metadata });
-    return found.id;
+  if (existing) {
+    await admin.auth.admin.updateUserById(existing.id, {
+      password,
+      user_metadata: metadata,
+    });
+    return existing.id;
   }
 
   const { data, error } = await admin.auth.admin.createUser({

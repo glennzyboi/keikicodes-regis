@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { sql } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
-import { portalUrl } from "@/lib/portal-token";
+import { enqueue, inSchoolTime } from "@/lib/notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -148,14 +148,74 @@ async function fulfil(session: Stripe.Checkout.Session) {
       }
     }
 
+    // The confirmation email is written here, inside the same transaction that
+    // creates the enrollments. If this rolls back, nobody is told they are
+    // registered when they are not. If it commits, the message is queued and
+    // will go out even if the mail provider is down right now.
+    const [summary] = await tx<
+      {
+        email: string;
+        parent_name: string;
+        class_title: string;
+        school: string;
+        timezone: string;
+        weekday: number;
+        start_time: string;
+        end_time: string;
+        weeks: number;
+        amount_cents: number;
+        first_session: Date | null;
+        children: string[];
+      }[]
+    >`select p.email, p.full_name as parent_name,
+             c.title as class_title, sc.name as school, sc.timezone,
+             c.weekday, c.start_time, c.end_time, c.weeks,
+             o.amount_cents,
+             (select min(ses.starts_at) from sessions ses
+               where ses.class_offering_id = c.id and ses.status = 'scheduled') as first_session,
+             array_agg(distinct ch.first_name || ' ' || ch.last_name) as children
+        from orders o
+        join parents p on p.id = o.parent_id
+        join order_items oi on oi.order_id = o.id
+        join children ch on ch.id = oi.child_id
+        join class_offerings c on c.id = oi.class_offering_id
+        join schools sc on sc.id = c.school_id
+       where o.id = ${orderId}
+       group by p.email, p.full_name, c.id, c.title, sc.name, sc.timezone,
+                c.weekday, c.start_time, c.end_time, c.weeks, o.amount_cents`;
+
+    if (summary) {
+      const days = ["Sundays","Mondays","Tuesdays","Wednesdays","Thursdays","Fridays","Saturdays"];
+      await enqueue(tx, {
+        template: "registration_confirmed",
+        toAddress: summary.email,
+        toName: summary.parent_name,
+        parentId: order.parent_id,
+        orderId,
+        payload: {
+          parentName: summary.parent_name,
+          className: summary.class_title,
+          school: summary.school,
+          children: summary.children,
+          schedule: `${days[summary.weekday]} ${summary.start_time.slice(0, 5)} to ${summary.end_time.slice(0, 5)}, ${summary.weeks} weeks`,
+          firstSession: summary.first_session
+            ? inSchoolTime(new Date(summary.first_session), summary.timezone)
+            : "To be confirmed",
+          amountCents: summary.amount_cents,
+        },
+        // One confirmation per order, however many times Stripe redelivers.
+        dedupeKey: `registration_confirmed:${orderId}`,
+      });
+    }
+
     await tx`update orders set fulfilled_at = now() where id = ${orderId}`;
     return order.parent_id;
   });
 
-  // Network calls live outside the transaction, always. In production this is
-  // where the confirmation email is queued; locally it is logged, and the link
-  // is the same signed portal link the email would carry.
-  console.log(`[webhook] order ${orderId} fulfilled. Portal link: ${portalUrl(parentId)}`);
+  // Nothing to send here. The confirmation was queued inside the transaction
+  // above and the worker will deliver it, which is the whole reason there is an
+  // outbox rather than an await in the middle of a payment webhook.
+  console.log(`[webhook] order ${orderId} fulfilled for parent ${parentId}`);
 }
 
 /**

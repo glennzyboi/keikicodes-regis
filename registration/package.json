@@ -12,7 +12,9 @@
     "thunder": "tsx --env-file=.env.local scripts/thunder.ts",
     "stripe:listen": "../tools/stripe.exe listen --forward-to localhost:3000/api/stripe/webhook",
     "test": "playwright test",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "notify": "tsx --env-file=.env.local scripts/notify.ts",
+    "reminders": "tsx --env-file=.env.local scripts/reminders.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

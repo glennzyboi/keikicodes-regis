@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { supabaseServer, currentStaff } from "@/lib/staff-auth";
 import { asUser } from "@/lib/rls";
 import { issueRefund } from "@/lib/refunds";
+import { enqueue, recipientsForClass, inSchoolTime } from "@/lib/notify";
 
 export async function signIn(_prev: string | null, formData: FormData): Promise<string | null> {
   const email = String(formData.get("email") ?? "");
@@ -69,7 +70,48 @@ export async function approveCancellation(formData: FormData) {
     await issueRefund(enrollmentId, refundCents, staff.email);
   }
 
+  if (freed) {
+    await asUser(staff.authUserId, async (tx) => {
+      const [row] = await tx<
+        {
+          email: string;
+          parent_name: string;
+          parent_id: string;
+          child_name: string;
+          title: string;
+          paid_cents: number;
+        }[]
+      >`select p.email, p.full_name as parent_name, p.id as parent_id,
+               ch.first_name || ' ' || ch.last_name as child_name,
+               c.title, oi.unit_price_cents as paid_cents
+          from enrollments e
+          join children ch on ch.id = e.child_id
+          join parents p on p.id = ch.parent_id
+          join class_offerings c on c.id = e.class_offering_id
+          join order_items oi on oi.id = e.order_item_id
+         where e.id = ${enrollmentId}`;
+
+      if (!row) return;
+
+      await enqueue(tx, {
+        template: "cancellation_approved",
+        toAddress: row.email,
+        toName: row.parent_name,
+        parentId: row.parent_id,
+        enrollmentId,
+        payload: {
+          childName: row.child_name,
+          className: row.title,
+          refundCents,
+          paidCents: row.paid_cents,
+        },
+        dedupeKey: `cancellation_approved:${enrollmentId}`,
+      });
+    });
+  }
+
   revalidatePath("/admin");
+  revalidatePath("/admin/cancellations");
 }
 
 /**
@@ -152,11 +194,61 @@ export async function cancelSession(formData: FormData) {
   const note = String(formData.get("note") ?? "").trim() || null;
 
   await asUser(staff.authUserId, async (tx) => {
-    await tx`update sessions set status = 'cancelled', note = ${note}
-              where id = ${sessionId} and status = 'scheduled'`;
+    const [session] = await tx<
+      {
+        id: string;
+        class_offering_id: string;
+        starts_at: Date;
+        title: string;
+        school: string;
+        timezone: string;
+      }[]
+    >`update sessions s
+         set status = 'cancelled', note = ${note}
+        from class_offerings c, schools sc
+       where s.id = ${sessionId}
+         and s.status = 'scheduled'
+         and c.id = s.class_offering_id
+         and sc.id = c.school_id
+      returning s.id, s.class_offering_id, s.starts_at,
+                c.title, sc.name as school, sc.timezone`;
+
+    if (!session) return;
+
+    // The next session that still stands, so the email can tell families when
+    // they are next expected rather than leaving them to work it out.
+    const [next] = await tx<{ starts_at: Date }[]>`
+      select starts_at from sessions
+       where class_offering_id = ${session.class_offering_id}
+         and status = 'scheduled' and starts_at >= now()
+       order by starts_at asc limit 1`;
+
+    // Enqueued in the same transaction as the cancellation. Either the class is
+    // cancelled and everyone is told, or neither happened.
+    for (const r of await recipientsForClass(tx, session.class_offering_id)) {
+      await enqueue(tx, {
+        template: "session_cancelled",
+        toAddress: r.email,
+        toName: r.parent_name,
+        parentId: r.parent_id,
+        childId: r.child_id,
+        enrollmentId: r.enrollment_id,
+        classOfferingId: session.class_offering_id,
+        sessionId: session.id,
+        payload: {
+          className: session.title,
+          school: session.school,
+          sessionDate: inSchoolTime(new Date(session.starts_at), session.timezone),
+          nextSession: next ? inSchoolTime(new Date(next.starts_at), session.timezone) : null,
+          note,
+        },
+        dedupeKey: `session_cancelled:${session.id}:${r.enrollment_id}`,
+      });
+    }
   });
 
   revalidatePath("/admin");
+  revalidatePath("/admin/classes");
 }
 
 /**
@@ -196,15 +288,44 @@ export async function rescheduleSession(formData: FormData) {
 
     // seq is unique per class, so the replacement takes the next free one
     // rather than reusing the original's and colliding on a second move.
-    await tx`insert into sessions
-               (class_offering_id, seq, starts_at, ends_at, status, rescheduled_from, note)
-             values (${original.class_offering_id},
-                     (select coalesce(max(seq), 0) + 1 from sessions
-                       where class_offering_id = ${original.class_offering_id}),
-                     ${moved.toISOString()},
-                     ${new Date(moved.getTime() + lengthMs).toISOString()},
-                     'scheduled', ${original.id}, ${note})`;
+    const [replacement] = await tx<{ id: string }[]>`
+      insert into sessions
+        (class_offering_id, seq, starts_at, ends_at, status, rescheduled_from, note)
+      values (${original.class_offering_id},
+              (select coalesce(max(seq), 0) + 1 from sessions
+                where class_offering_id = ${original.class_offering_id}),
+              ${moved.toISOString()},
+              ${new Date(moved.getTime() + lengthMs).toISOString()},
+              'scheduled', ${original.id}, ${note})
+      returning id`;
+
+    const [ctx] = await tx<{ title: string; school: string; timezone: string }[]>`
+      select c.title, sc.name as school, sc.timezone
+        from class_offerings c join schools sc on sc.id = c.school_id
+       where c.id = ${original.class_offering_id}`;
+
+    for (const r of await recipientsForClass(tx, original.class_offering_id)) {
+      await enqueue(tx, {
+        template: "session_rescheduled",
+        toAddress: r.email,
+        toName: r.parent_name,
+        parentId: r.parent_id,
+        childId: r.child_id,
+        enrollmentId: r.enrollment_id,
+        classOfferingId: original.class_offering_id,
+        sessionId: replacement.id,
+        payload: {
+          className: ctx.title,
+          school: ctx.school,
+          oldDate: inSchoolTime(new Date(original.starts_at), ctx.timezone),
+          newDate: inSchoolTime(moved, ctx.timezone),
+          note,
+        },
+        dedupeKey: `session_rescheduled:${replacement.id}:${r.enrollment_id}`,
+      });
+    }
   });
 
   revalidatePath("/admin");
+  revalidatePath("/admin/classes");
 }

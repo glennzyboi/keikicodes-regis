@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
-import { createPortalToken } from "@/lib/portal-token";
+import { currentParent } from "@/lib/parent-auth";
 import { isUuid } from "@/lib/uuid";
 
 export const runtime = "nodejs";
@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * Status of one order, polled by the confirming page while it waits for the
- * webhook. Returns only what that page needs, and hands back a portal token
- * once the order is genuinely fulfilled, never before.
+ * webhook. Returns only what that page needs, and only to the family it
+ * belongs to: an order id in a URL is not a credential, so the signed in
+ * parent has to own it.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,18 +21,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  const parent = await currentParent();
+  if (!parent) return NextResponse.json({ error: "not_signed_in" }, { status: 401 });
+
   const [order] = await sql<
-    { id: string; parent_id: string; status: string; fulfilled_at: Date | null; amount_cents: number }[]
-  >`select id, parent_id, status, fulfilled_at, amount_cents from orders where id = ${id}`;
+    { status: string; fulfilled_at: Date | null; amount_cents: number }[]
+  >`select status, fulfilled_at, amount_cents
+      from orders where id = ${id} and parent_id = ${parent.id}`;
 
+  // Not theirs and not there answer the same way, so this cannot be used to
+  // find out which order ids exist.
   if (!order) return NextResponse.json({ error: "not_found" }, { status: 404 });
-
-  const fulfilled = Boolean(order.fulfilled_at);
 
   return NextResponse.json({
     status: order.status,
-    fulfilled,
+    fulfilled: Boolean(order.fulfilled_at),
     amountCents: order.amount_cents,
-    portalToken: fulfilled ? createPortalToken(order.parent_id) : null,
   });
 }

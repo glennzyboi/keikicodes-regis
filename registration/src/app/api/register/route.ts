@@ -3,6 +3,7 @@ import { sql } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import { RegistrationInput, createPendingOrder } from "@/lib/registration";
 import { HOLD_SECONDS } from "@/lib/holds";
+import { currentParent } from "@/lib/parent-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,14 @@ export const dynamic = "force-dynamic";
  * confirmation, and this route never pretends it is.
  */
 export async function POST(req: Request) {
+  // Identity comes from the session, never the payload. A signed out request
+  // cannot register anyone, and a signed in one cannot register children
+  // against a different account by editing the body.
+  const parent = await currentParent();
+  if (!parent) {
+    return NextResponse.json({ error: "not_signed_in" }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -33,7 +42,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const result = await createPendingOrder(parsed.data);
+  const result = await createPendingOrder(parent.id, parsed.data);
 
   if (!result.ok) {
     // 409, not 400: the request was well formed, the world just changed.
@@ -69,11 +78,6 @@ export async function POST(req: Request) {
       }
     }
 
-    const [payer] = await tx<{ email: string }[]>`
-      select p.email from parents p
-        join orders o on o.parent_id = p.id
-       where o.id = ${order.id}`;
-
     const items = await tx<{ stripe_price_id: string | null }[]>`
       select oi.stripe_price_id
         from order_items oi
@@ -90,7 +94,7 @@ export async function POST(req: Request) {
         line_items: items.map((i) => ({ price: i.stripe_price_id!, quantity: 1 })),
         client_reference_id: order.id,
         // They already typed it on our form; do not make them type it again.
-        customer_email: payer.email,
+        customer_email: parent.email,
         // The classes are priced in USD by a Hawaii business. Adaptive pricing
         // would offer a Manila browser the peso equivalent, which is a different
         // amount from the one the parent agreed to on our own page.

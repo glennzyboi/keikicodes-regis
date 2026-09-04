@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 
 const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
@@ -12,15 +12,28 @@ function unique(prefix: string) {
 }
 
 /**
+ * Create an account through the real signup form.
+ *
+ * Registration now requires one, so every spec starts here. Going through the
+ * form rather than seeding a session means the auth path is covered by every
+ * run instead of being the one thing nobody tests.
+ */
+async function signUp(page: Page, email: string, name = "Test Parent") {
+  await page.goto("/signup");
+  await page.getByLabel("Your name").fill(name);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("TestParent!2026");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL(/\/portal/, { timeout: 30_000 });
+}
+
+/**
  * Stripe's hosted checkout, paid with the standard test card.
  *
  * The hosted page presents payment methods as an accordion with nothing
  * selected, so the card fields do not exist in the DOM until Card is chosen.
  * The radio sits under a full-row click overlay that reports itself as
  * offscreen, so check it directly rather than clicking the row.
- *
- * Email is not an input here: it is passed as customer_email when the session
- * is created, and the hosted page renders it as read-only text.
  */
 async function payWithTestCard(page: Page) {
   await page.waitForURL(/checkout\.stripe\.com/, { timeout: 45_000 });
@@ -42,9 +55,30 @@ async function payWithTestCard(page: Page) {
   await page.getByTestId("hosted-payment-submit-button").click();
 }
 
+test("registration requires an account, and sends you back where you were going", async ({
+  page,
+}) => {
+  const [cls] = await sql<{ id: string }[]>`
+    select id from class_offerings where title = 'Web Design Basics'`;
+
+  await page.goto(`/register/${cls.id}`);
+
+  // Bounced to sign in, carrying the destination so the login wall is not a
+  // dead end.
+  await expect(page).toHaveURL(new RegExp(`/login\\?next=.*${cls.id}`));
+
+  await signUp(page, `${unique("gate")}@example.test`, "Gate Tester");
+
+  await page.goto(`/register/${cls.id}`);
+  await expect(page.getByRole("heading", { name: "Web Design Basics" })).toBeVisible();
+  await expect(page.getByText("Signed in")).toBeVisible();
+});
+
 test("a parent registers two children, pays, and the webhook confirms it", async ({ page }) => {
   const email = `${unique("parent")}@example.test`;
   const lastName = unique("Kim").replace(/-/g, "");
+
+  await signUp(page, email, "Kai Parent");
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /register your keiki/i })).toBeVisible();
@@ -53,9 +87,6 @@ test("a parent registers two children, pays, and the webhook confirms it", async
   const card = page.locator("article", { hasText: "Scratch Adventures" });
   await card.getByRole("link", { name: "Register" }).click();
   await expect(page.getByRole("heading", { name: "Scratch Adventures" })).toBeVisible();
-
-  await page.getByLabel("Your name").fill("Kai Parent");
-  await page.getByLabel("Email").fill(email);
 
   await page.getByLabel("First name").fill("Noa");
   await page.getByLabel("Last name").fill(lastName);
@@ -103,21 +134,35 @@ test("a parent registers two children, pays, and the webhook confirms it", async
       join order_items oi on oi.id = h.order_item_id
      where oi.order_id = ${order.id}`;
   expect(holds[0].n).toBe(0);
+
+  // Fulfilment queued the confirmation in the same transaction as the
+  // enrollments, so it exists whether or not the mail provider is reachable.
+  const queued = await sql<{ n: number }[]>`
+    select count(*)::int as n from notifications
+     where order_id = ${order.id} and template = 'registration_confirmed'`;
+  expect(queued[0].n).toBe(1);
 });
 
 test("submitting the same registration twice creates one order, not two", async ({
-  request,
+  page,
+  context,
 }) => {
+  const email = `${unique("twice")}@example.test`;
+  await signUp(page, email, "Double Clicker");
+
   const [cls] = await sql<{ id: string }[]>`
     select id from class_offerings where title = 'Python Starters'`;
 
   const payload = {
     idempotencyKey: unique("idem"),
-    parent: { email: `${unique("twice")}@example.test`, fullName: "Double Clicker" },
     registrations: [
       {
         classOfferingId: cls.id,
-        child: { firstName: "Mia", lastName: unique("Lee").replace(/-/g, ""), dateOfBirth: "2016-02-20" },
+        child: {
+          firstName: "Mia",
+          lastName: unique("Lee").replace(/-/g, ""),
+          dateOfBirth: "2016-02-20",
+        },
       },
     ],
   };
@@ -125,10 +170,14 @@ test("submitting the same registration twice creates one order, not two", async 
   const before = await sql<{ seats_taken: number }[]>`
     select seats_taken from class_offerings where id = ${cls.id}`;
 
+  // The signed in browser context, so the request carries the session cookie
+  // exactly the way the form would.
+  const api: APIRequestContext = context.request;
+
   // Fired together, the way a double click actually arrives.
   const [a, b] = await Promise.all([
-    request.post("/api/register", { data: payload }),
-    request.post("/api/register", { data: payload }),
+    api.post("/api/register", { data: payload }),
+    api.post("/api/register", { data: payload }),
   ]);
 
   expect(a.ok()).toBeTruthy();
@@ -145,4 +194,23 @@ test("submitting the same registration twice creates one order, not two", async 
   const after = await sql<{ seats_taken: number }[]>`
     select seats_taken from class_offerings where id = ${cls.id}`;
   expect(after[0].seats_taken).toBe(before[0].seats_taken + 1);
+});
+
+test("a signed out request cannot register anyone", async ({ request }) => {
+  const [cls] = await sql<{ id: string }[]>`
+    select id from class_offerings where title = 'Minecraft Modding'`;
+
+  const res = await request.post("/api/register", {
+    data: {
+      idempotencyKey: unique("anon"),
+      registrations: [
+        {
+          classOfferingId: cls.id,
+          child: { firstName: "Nobody", lastName: "Anon", dateOfBirth: "2015-01-01" },
+        },
+      ],
+    },
+  });
+
+  expect(res.status()).toBe(401);
 });

@@ -20,7 +20,6 @@ function Confirming() {
   const [state, setState] = useState<"waiting" | "done" | "slow" | "error">(
     orderId ? "waiting" : "error",
   );
-  const [portalToken, setPortalToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orderId) return;
@@ -35,7 +34,6 @@ function Confirming() {
         const res = await fetch(`/api/orders/${orderId}`, { cache: "no-store" });
         const data = await res.json();
         if (data.fulfilled) {
-          setPortalToken(data.portalToken);
           setState("done");
           return;
         }
@@ -78,15 +76,13 @@ function Confirming() {
             Your keiki are <span className="kc-highlight">in</span>
           </h1>
           <p className="mt-4 text-ink-soft">
-            We have emailed your confirmation with a link to manage your registrations. No
-            account or password needed, the link is enough.
+            A confirmation is on its way to your inbox. Everything you have registered
+            for lives in your account.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
-            {portalToken && (
-              <Link href={`/portal?t=${portalToken}`} className="kc-btn kc-btn-primary">
-                View my registrations
-              </Link>
-            )}
+            <Link href="/portal" className="kc-btn kc-btn-primary">
+              View my registrations
+            </Link>
             <Link href="/" className="kc-btn kc-btn-quiet">
               Browse more classes
             </Link>

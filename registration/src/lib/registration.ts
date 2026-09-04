@@ -17,11 +17,9 @@ export const RegistrationInput = z.object({
   // Minted by the form when it opens, not by the server. A double-clicked
   // submit, or a mobile browser silently retrying, arrives with the same key.
   idempotencyKey: z.string().min(8).max(100),
-  parent: z.object({
-    email: z.string().email().max(200),
-    fullName: z.string().min(1).max(200),
-    phone: z.string().max(50).optional().nullable(),
-  }),
+  // Deliberately no parent field. Identity comes from the signed in session,
+  // never from the request body, so nobody can register children against
+  // somebody else's account by editing a payload.
   registrations: z
     .array(
       z.object({
@@ -47,26 +45,25 @@ export type RegistrationResult =
   | { ok: false; reason: "class_not_available" };
 
 export async function createPendingOrder(
+  parentId: string,
   input: RegistrationInput,
 ): Promise<RegistrationResult> {
   return sql.begin(async (tx) => {
-    // 1. Resolve the parent on normalised email.
+    // 1. The parent is already resolved.
     //
-    // Identity is the email address, stored as citext so case never splits a
-    // family in two. This is an atomic upsert rather than select-then-insert,
-    // so two simultaneous first-time registrations cannot both create a row.
+    // They signed in, so identity is settled before this function is called and
+    // there is no matching to do. That removes a whole class of question: no
+    // fuzzy matching on name or phone, no deciding whether two spellings are
+    // the same family. A false merge joins two families' records, and with
+    // children's data that is an incident rather than a bug.
     //
-    // Deliberately NOT fuzzy matching on name or phone: a false merge joins two
-    // families' records, and with children's data that is an incident, not a
-    // bug. A false split is only a support ticket. Take the cheap error.
+    // The row is locked for the duration. Two submissions from the same account
+    // at the same moment serialise here, which is what makes the idempotency
+    // check below safe against a genuine double click.
     const [parent] = await tx<{ id: string }[]>`
-      insert into parents (email, full_name, phone)
-      values (${input.parent.email.trim().toLowerCase()}, ${input.parent.fullName.trim()},
-              ${input.parent.phone ?? null})
-      on conflict (email) do update
-        set full_name = excluded.full_name,
-            phone = coalesce(excluded.phone, parents.phone)
-      returning id`;
+      select id from parents where id = ${parentId} for update`;
+
+    if (!parent) return { ok: false as const, reason: "class_not_available" as const };
 
     // 2. Idempotency. If this exact submission has been seen, hand back the
     //    same order instead of creating a second one and charging twice.

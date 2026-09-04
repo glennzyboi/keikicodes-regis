@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { sql } from "@/lib/db";
 import { isUuid } from "@/lib/uuid";
+import { currentParent } from "@/lib/parent-auth";
 import { formatMoney } from "@/lib/stripe";
 import RegisterForm from "./register-form";
 
@@ -18,6 +19,12 @@ export default async function RegisterPage({
   // A malformed id is a wrong address, not a server error. Without this the
   // uuid comparison below raises in Postgres and the page 500s.
   if (!isUuid(id)) notFound();
+
+  // Registration needs an account. Sending them to sign in with next= set means
+  // they land back on this exact class rather than the catalogue, which is the
+  // difference between a login wall and a dead end.
+  const parent = await currentParent();
+  if (!parent) redirect(`/login?next=${encodeURIComponent(`/register/${id}`)}`);
 
   const [cls] = await sql<
     {
@@ -88,6 +95,8 @@ export default async function RegisterPage({
       </div>
 
       <RegisterForm
+        parentName={parent.fullName}
+        parentEmail={parent.email}
         classId={cls.id}
         classTitle={cls.title}
         priceCents={cls.price_cents}

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { sql } from "@/lib/db";
 import { formatMoney } from "@/lib/stripe";
-import { verifyPortalToken } from "@/lib/portal-token";
+import { redirect } from "next/navigation";
+import { currentParent } from "@/lib/parent-auth";
 import { CancelButton } from "./cancel-button";
-import { FindLink } from "./find-link";
 
 export const dynamic = "force-dynamic";
 
@@ -50,54 +50,12 @@ type Row = {
   sessions_left: number;
 };
 
-export default async function Portal({
-  searchParams,
-}: {
-  searchParams: Promise<{ t?: string }>;
-}) {
-  const { t } = await searchParams;
-  const parentId = t ? verifyPortalToken(t) : null;
+export default async function Portal() {
+  // No token, no link, no shared credential. Signed in or not here.
+  const parent = await currentParent();
+  if (!parent) redirect("/login?next=%2Fportal");
 
-  if (!parentId) {
-    return (
-      <div className="mx-auto max-w-xl px-5 py-20">
-        <span className="kc-eyebrow">My registrations</span>
-        <h1 className="mt-5 font-display text-4xl font-bold text-green-900">
-          {t ? (
-            <>
-              That link has <span className="kc-highlight">expired</span>
-            </>
-          ) : (
-            <>
-              Find your <span className="kc-highlight">registrations</span>
-            </>
-          )}
-        </h1>
-        <p className="mt-4 text-ink-soft">
-          {t
-            ? "Links last thirty days, which is about one term. Ask for a fresh one below."
-            : "Your confirmation email carries a link that opens this page. There is no password to remember and no account to create."}
-        </p>
-        <FindLink />
-      </div>
-    );
-  }
-
-  const [parent] = await sql<{ full_name: string; email: string }[]>`
-    select full_name, email from parents where id = ${parentId}`;
-
-  if (!parent) {
-    return (
-      <div className="mx-auto max-w-xl px-5 py-20">
-        <h1 className="font-display text-3xl font-bold text-green-900">
-          We could not find that family
-        </h1>
-        <Link href="/" className="kc-btn kc-btn-quiet mt-6">
-          Back to classes
-        </Link>
-      </div>
-    );
-  }
+  const parentId = parent.id;
 
   const rows = await sql<Row[]>`
     select e.id as enrollment_id, e.status, e.refund_owed,
@@ -127,11 +85,10 @@ export default async function Portal({
     <div className="mx-auto max-w-4xl px-5 py-12">
       <span className="kc-eyebrow">My registrations</span>
       <h1 className="mt-5 font-display text-4xl font-bold leading-tight text-green-900">
-        Aloha, {parent.full_name.split(" ")[0]}
+        Aloha, {parent.fullName.split(" ")[0]}
       </h1>
       <p className="mt-3 text-ink-soft">
-        Everything {parent.email} is registered for. No password needed, this link is
-        enough.
+        Everything registered to {parent.email}.
       </p>
 
       {live.length === 0 && (
@@ -209,7 +166,7 @@ export default async function Portal({
               </p>
             ) : (
               <div className="mt-4 flex justify-end">
-                <CancelButton token={t!} enrollmentId={r.enrollment_id} child={r.child} />
+                <CancelButton enrollmentId={r.enrollment_id} child={r.child} />
               </div>
             )}
           </article>

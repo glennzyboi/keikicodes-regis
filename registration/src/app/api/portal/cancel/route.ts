@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
-import { verifyPortalToken } from "@/lib/portal-token";
+import { currentParent } from "@/lib/parent-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const Body = z.object({
-  token: z.string().min(10),
   enrollmentId: z.string().uuid(),
 });
 
 /**
  * A parent requests a cancellation.
  *
- * The token proves who they are; the UPDATE proves the enrollment is theirs.
- * Both are needed: a valid token for family A must not be able to cancel a
- * place belonging to family B, so ownership is checked in the WHERE clause
- * rather than trusted from the request body.
+ * The session proves who they are; the UPDATE proves the enrollment is theirs.
+ * Both are needed: a signed in family A must not be able to cancel a place
+ * belonging to family B, so ownership is checked in the WHERE clause rather
+ * than trusted from the request body.
  *
  * The seat is NOT released here. It stays theirs until staff approve, because
  * releasing it early means a parent who changes their mind an hour later has
@@ -29,10 +28,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });
   }
 
-  const parentId = verifyPortalToken(parsed.data.token);
-  if (!parentId) {
-    return NextResponse.json({ error: "bad_token" }, { status: 401 });
+  const parent = await currentParent();
+  if (!parent) {
+    return NextResponse.json({ error: "not_signed_in" }, { status: 401 });
   }
+  const parentId = parent.id;
 
   const updated = await sql<{ id: string }[]>`
     update enrollments e

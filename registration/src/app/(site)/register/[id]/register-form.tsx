@@ -13,17 +13,20 @@ const money = (cents: number) =>
 const blankChild = (): Child => ({ firstName: "", lastName: "", dateOfBirth: "", notes: "" });
 
 export default function RegisterForm({
+  parentName,
+  parentEmail,
   classId,
   classTitle,
   priceCents,
   others,
 }: {
+  parentName: string;
+  parentEmail: string;
   classId: string;
   classTitle: string;
   priceCents: number;
   others: Other[];
 }) {
-  const [parent, setParent] = useState({ email: "", fullName: "", phone: "" });
   const [children, setChildren] = useState<Child[]>([blankChild()]);
   const [extraClasses, setExtraClasses] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -69,7 +72,7 @@ export default function RegisterForm({
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idempotencyKey, parent, registrations }),
+        body: JSON.stringify({ idempotencyKey, registrations }),
       });
       const data = await res.json();
 
@@ -103,36 +106,18 @@ export default function RegisterForm({
   return (
     <form onSubmit={submit} className="mt-6 space-y-5">
       <section className="kc-card p-7">
-        <h2 className="font-display text-xl font-bold text-green-900">About you</h2>
-        <p className="mt-1 text-sm text-ink-soft">
-          No account needed. We will email you a link to manage your registrations.
-        </p>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <label className="kc-label" htmlFor="parent-name">Your name</label>
-            <input
-              id="parent-name" className="kc-field" required autoComplete="name"
-              value={parent.fullName}
-              onChange={(e) => setParent({ ...parent, fullName: e.target.value })}
-            />
+            <h2 className="font-display text-xl font-bold text-green-900">Registering as</h2>
+            <p className="mt-1.5 font-medium">{parentName}</p>
+            <p className="text-sm text-ink-soft">{parentEmail}</p>
           </div>
-          <div>
-            <label className="kc-label" htmlFor="parent-email">Email</label>
-            <input
-              id="parent-email" className="kc-field" type="email" required autoComplete="email"
-              value={parent.email}
-              onChange={(e) => setParent({ ...parent, email: e.target.value })}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="kc-label" htmlFor="parent-phone">Phone (optional)</label>
-            <input
-              id="parent-phone" className="kc-field" autoComplete="tel"
-              value={parent.phone}
-              onChange={(e) => setParent({ ...parent, phone: e.target.value })}
-            />
-          </div>
+          <span className="kc-chip kc-chip-accent">Signed in</span>
         </div>
+        <p className="mt-4 text-sm text-ink-soft">
+          Your keiki are saved to this account, so next term you can register them
+          again without typing anything twice.
+        </p>
       </section>
 
       <section className="kc-card p-7">

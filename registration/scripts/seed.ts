@@ -39,6 +39,12 @@ const admin = createClient(
 const STAFF_EMAIL = "ops@keikicoders.test";
 const STAFF_PASSWORD = "KeikiOps!2026";
 
+/** A parent account to sign in as, so the flow can be shown without signing up
+ *  first every time the database is reset. */
+const DEMO_PARENT_EMAIL = "parent@keikicoders.test";
+const DEMO_PARENT_PASSWORD = "KeikiParent!2026";
+const DEMO_PARENT_NAME = "Malia Kealoha";
+
 /** Schools named publicly on keikicoders.com as partner campuses. */
 const SCHOOLS = [
   { name: "Iolani School" },
@@ -159,6 +165,34 @@ function sessionDates(firstSession: string, weeks: number, start: string, end: s
   return out;
 }
 
+/**
+ * Create the auth user if it is missing, reset the password if it is not.
+ * Re-running the seed should always leave a login that actually works, even if
+ * someone changed the password while poking at the system.
+ */
+async function ensureAuthUser(
+  email: string,
+  password: string,
+  metadata: Record<string, unknown>,
+) {
+  const { data: existing } = await admin.auth.admin.listUsers();
+  const found = existing?.users.find((u) => u.email === email);
+
+  if (found) {
+    await admin.auth.admin.updateUserById(found.id, { password, user_metadata: metadata });
+    return found.id;
+  }
+
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: metadata,
+  });
+  if (error) throw error;
+  return data.user!.id;
+}
+
 async function main() {
   // Families, money and seats go. The catalogue stays, and is updated in place.
   console.log("Clearing families, orders and seats...");
@@ -267,25 +301,28 @@ async function main() {
     console.log(`  ${c.title} at ${c.school}: ${c.capacity} seats, ${priceId}`);
   }
 
-  console.log("Creating staff login...");
-  const { data: existing } = await admin.auth.admin.listUsers();
-  const found = existing?.users.find((u) => u.email === STAFF_EMAIL);
-  let authUserId = found?.id;
-  if (!authUserId) {
-    const { data, error } = await admin.auth.admin.createUser({
-      email: STAFF_EMAIL,
-      password: STAFF_PASSWORD,
-      email_confirm: true,
-    });
-    if (error) throw error;
-    authUserId = data.user!.id;
-  }
+  console.log("Creating logins...");
+  const staffAuthId = await ensureAuthUser(STAFF_EMAIL, STAFF_PASSWORD, {
+    full_name: "Keiki Ops",
+  });
   await sql`insert into staff (auth_user_id, email, full_name)
-            values (${authUserId!}, ${STAFF_EMAIL}, 'Keiki Ops')
+            values (${staffAuthId}, ${STAFF_EMAIL}, 'Keiki Ops')
             on conflict (auth_user_id) do nothing`;
 
+  // A parent account, linked to a parents row by email exactly the way a real
+  // signup would link it.
+  const parentAuthId = await ensureAuthUser(DEMO_PARENT_EMAIL, DEMO_PARENT_PASSWORD, {
+    full_name: DEMO_PARENT_NAME,
+  });
+  await sql`insert into parents (auth_user_id, email, full_name)
+            values (${parentAuthId}, ${DEMO_PARENT_EMAIL}, ${DEMO_PARENT_NAME})
+            on conflict (email) do update
+              set auth_user_id = excluded.auth_user_id,
+                  full_name = excluded.full_name`;
+
   console.log(`\nDone.`);
-  console.log(`  Staff login: ${STAFF_EMAIL} / ${STAFF_PASSWORD}`);
+  console.log(`  Staff:  ${STAFF_EMAIL} / ${STAFF_PASSWORD}`);
+  console.log(`  Parent: ${DEMO_PARENT_EMAIL} / ${DEMO_PARENT_PASSWORD}`);
   await sql.end();
 }
 

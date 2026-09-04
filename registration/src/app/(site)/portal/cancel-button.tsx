@@ -12,11 +12,9 @@ import { useRouter } from "next/navigation";
  * it while the office is deciding.
  */
 export function CancelButton({
-  token,
   enrollmentId,
   child,
 }: {
-  token: string;
   enrollmentId: string;
   child: string;
 }) {
@@ -30,12 +28,16 @@ export function CancelButton({
     const res = await fetch("/api/portal/cancel", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token, enrollmentId }),
+      body: JSON.stringify({ enrollmentId }),
     });
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setError(body.error === "not_yours" ? "That is not your registration." : "Something went wrong. Please try again.");
+      setError(
+        body.error === "not_yours"
+          ? "That is not your registration."
+          : "Something went wrong. Please try again.",
+      );
       return;
     }
 

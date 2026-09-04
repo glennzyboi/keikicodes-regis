@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { currentParent, googleEnabled } from "@/lib/parent-auth";
+import { safeNext } from "@/lib/forms";
 import { AuthForm } from "./auth-form";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +27,4 @@ export default async function Login({
       <AuthForm mode="signin" next={destination} googleEnabled={googleEnabled} />
     </div>
   );
-}
-
-/**
- * Only ever redirect within this site. An open redirect on a login page is how
- * a convincing phishing link gets built out of a domain people trust.
- */
-export function safeNext(next: string | undefined) {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/portal";
-  return next;
 }

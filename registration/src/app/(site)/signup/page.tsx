@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentParent, googleEnabled } from "@/lib/parent-auth";
 import { AuthForm } from "../login/auth-form";
-import { safeNext } from "../login/page";
+import { safeNext } from "@/lib/forms";
 
 export const dynamic = "force-dynamic";
 

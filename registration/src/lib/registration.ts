@@ -42,6 +42,7 @@ export type RegistrationResult =
   | { ok: true; orderId: string; amountCents: number; reused: boolean }
   | { ok: false; reason: "class_full"; fullClasses: { id: string; title: string }[] }
   | { ok: false; reason: "already_enrolled"; detail: string }
+  | { ok: false; reason: "schedule_conflict"; detail: string }
   | { ok: false; reason: "class_not_available" };
 
 export async function createPendingOrder(
@@ -132,6 +133,47 @@ export async function createPendingOrder(
           reason: "already_enrolled" as const,
           detail: `${input.registrations[i].child.firstName} is already enrolled in ${cls.title}.`,
         };
+      }
+    }
+
+    // 5b. A child cannot be in two places at once.
+    //
+    //     Checked against places they already hold, and against the other
+    //     classes in this same submission. The second half matters: nothing
+    //     has been written yet, so the database cannot see the clash between
+    //     two rows that are both about to be inserted.
+    //
+    //     Named rather than generic. "Kaimana already has Roblox Studio Lab at
+    //     that time" is actionable; "schedule conflict" makes a parent hunt.
+    for (let i = 0; i < input.registrations.length; i++) {
+      const r = input.registrations[i];
+
+      const existing = await tx<{ title: string; school: string }[]>`
+        select title, school from clashing_enrollments(${childIds[i]}, ${r.classOfferingId})`;
+
+      if (existing.length > 0) {
+        return {
+          ok: false as const,
+          reason: "schedule_conflict" as const,
+          detail: `${r.child.firstName} already has ${existing[0].title} at that time. A child cannot be in two classes at once.`,
+        };
+      }
+
+      // Against the rest of this submission, for the same child.
+      for (let j = 0; j < i; j++) {
+        if (childIds[j] !== childIds[i]) continue;
+        const other = input.registrations[j];
+        const [{ classes_clash: clashes }] = await tx<{ classes_clash: boolean }[]>`
+          select classes_clash(${r.classOfferingId}, ${other.classOfferingId})`;
+        if (clashes) {
+          const a = byId.get(r.classOfferingId)!;
+          const b = byId.get(other.classOfferingId)!;
+          return {
+            ok: false as const,
+            reason: "schedule_conflict" as const,
+            detail: `${a.title} and ${b.title} run at the same time, so ${r.child.firstName} cannot do both.`,
+          };
+        }
       }
     }
 

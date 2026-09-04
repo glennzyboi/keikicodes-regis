@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { supabaseParent, currentParent } from "@/lib/parent-auth";
+import { parseForm, safeNext, SignInForm, SignUpForm, ProfileForm } from "@/lib/forms";
 
 export type AuthState = { error: string | null };
 
@@ -14,9 +15,10 @@ export type AuthState = { error: string | null };
  * involved that is not a question anyone gets to ask by guessing addresses.
  */
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
-  const email = String(formData.get("email") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  const next = String(formData.get("next") ?? "/portal");
+  const parsed = parseForm(SignInForm, formData);
+  if (!parsed.ok) return { error: parsed.error };
+  const { email, password } = parsed.data;
+  const next = safeNext(parsed.data.next);
 
   const supabase = await supabaseParent();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -26,15 +28,10 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
 }
 
 export async function signUp(_prev: AuthState, formData: FormData): Promise<AuthState> {
-  const email = String(formData.get("email") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  const fullName = String(formData.get("fullName") ?? "").trim();
-  const next = String(formData.get("next") ?? "/portal");
-
-  if (fullName.length < 2) return { error: "Please tell us your name." };
-  if (password.length < 8) {
-    return { error: "Please use at least eight characters for your password." };
-  }
+  const parsed = parseForm(SignUpForm, formData);
+  if (!parsed.ok) return { error: parsed.error };
+  const { email, password, fullName } = parsed.data;
+  const next = safeNext(parsed.data.next);
 
   const supabase = await supabaseParent();
   const { error } = await supabase.auth.signUp({
@@ -68,9 +65,9 @@ export async function updateProfile(_prev: AuthState, formData: FormData): Promi
   const parent = await currentParent();
   if (!parent) redirect("/login");
 
-  const fullName = String(formData.get("fullName") ?? "").trim();
-  const phone = String(formData.get("phone") ?? "").trim() || null;
-  if (fullName.length < 2) return { error: "Please tell us your name." };
+  const parsed = parseForm(ProfileForm, formData);
+  if (!parsed.ok) return { error: parsed.error };
+  const { fullName, phone } = parsed.data;
 
   const { sql } = await import("@/lib/db");
   await sql`update parents set full_name = ${fullName}, phone = ${phone}

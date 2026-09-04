@@ -82,6 +82,8 @@ export default function RegisterForm({
           setError(`Sorry, ${names} filled up while you were registering. Nothing was charged.`);
         } else if (data.reason === "already_enrolled") {
           setError(data.detail);
+        } else if (data.reason === "schedule_conflict") {
+          setError(data.detail);
         } else if (data.reason === "class_not_available") {
           setError("That class is not open for registration.");
         } else {

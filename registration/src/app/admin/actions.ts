@@ -6,10 +6,22 @@ import { supabaseServer, currentStaff } from "@/lib/staff-auth";
 import { asUser } from "@/lib/rls";
 import { issueRefund } from "@/lib/refunds";
 import { enqueue, recipientsForClass, inSchoolTime } from "@/lib/notify";
+import {
+  parseForm,
+  SignInForm,
+  EnrollmentIdForm,
+  ApproveCancellationForm,
+  CancelSessionForm,
+  RescheduleSessionForm,
+  SupportNoteForm,
+  NotificationIdForm,
+  TransferForm,
+} from "@/lib/forms";
 
 export async function signIn(_prev: string | null, formData: FormData): Promise<string | null> {
-  const email = String(formData.get("email") ?? "");
-  const password = String(formData.get("password") ?? "");
+  const parsed = parseForm(SignInForm, formData);
+  if (!parsed.ok) return parsed.error;
+  const { email, password } = parsed.data;
 
   const supabase = await supabaseServer();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -45,8 +57,9 @@ export async function approveCancellation(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const enrollmentId = String(formData.get("enrollmentId"));
-  const refundCents = Number(formData.get("refundCents") ?? 0);
+  const parsed = parseForm(ApproveCancellationForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId, refundCents } = parsed.data;
 
   const freed = await asUser(staff.authUserId, async (tx) => {
     const [enrollment] = await tx<{ id: string; class_offering_id: string }[]>`
@@ -124,7 +137,9 @@ export async function declineCancellation(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const enrollmentId = String(formData.get("enrollmentId"));
+  const parsed = parseForm(EnrollmentIdForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     const [enrollment] = await tx<{ id: string }[]>`
@@ -149,8 +164,9 @@ export async function retryRefund(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const enrollmentId = String(formData.get("enrollmentId"));
-  const refundCents = Number(formData.get("refundCents") ?? 0);
+  const parsed = parseForm(ApproveCancellationForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId, refundCents } = parsed.data;
 
   await issueRefund(enrollmentId, refundCents, staff.email);
   revalidatePath("/admin");
@@ -167,7 +183,9 @@ export async function markRefunded(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const enrollmentId = String(formData.get("enrollmentId"));
+  const parsed = parseForm(EnrollmentIdForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     await tx`update enrollments
@@ -190,8 +208,9 @@ export async function cancelSession(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const sessionId = String(formData.get("sessionId"));
-  const note = String(formData.get("note") ?? "").trim() || null;
+  const parsed = parseForm(CancelSessionForm, formData);
+  if (!parsed.ok) return;
+  const { sessionId, note } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     const [session] = await tx<
@@ -262,10 +281,9 @@ export async function rescheduleSession(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const sessionId = String(formData.get("sessionId"));
-  const newDate = String(formData.get("newDate") ?? "");
-  const note = String(formData.get("note") ?? "").trim() || null;
-  if (!newDate) return;
+  const parsed = parseForm(RescheduleSessionForm, formData);
+  if (!parsed.ok) return;
+  const { sessionId, newDate, note } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     const [original] = await tx<
@@ -341,12 +359,9 @@ export async function addSupportNote(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const parentId = String(formData.get("parentId"));
-  const childId = String(formData.get("childId") ?? "") || null;
-  const kind = String(formData.get("kind") ?? "note");
-  const body = String(formData.get("body") ?? "").trim();
-
-  if (!body) return;
+  const parsed = parseForm(SupportNoteForm, formData);
+  if (!parsed.ok) return;
+  const { parentId, childId, kind, body } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     await tx`insert into support_notes
@@ -367,7 +382,9 @@ export async function requeueNotification(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const id = String(formData.get("notificationId"));
+  const parsedId = parseForm(NotificationIdForm, formData);
+  if (!parsedId.ok) return;
+  const id = parsedId.data.notificationId;
 
   await asUser(staff.authUserId, async (tx) => {
     await tx`update notifications
@@ -385,7 +402,9 @@ export async function cancelNotification(formData: FormData) {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const id = String(formData.get("notificationId"));
+  const parsedId = parseForm(NotificationIdForm, formData);
+  if (!parsedId.ok) return;
+  const id = parsedId.data.notificationId;
 
   await asUser(staff.authUserId, async (tx) => {
     await tx`update notifications set status = 'cancelled'
@@ -411,9 +430,9 @@ export async function transferEnrollment(formData: FormData): Promise<void> {
   const staff = await currentStaff();
   if (!staff) redirect("/admin/login");
 
-  const enrollmentId = String(formData.get("enrollmentId"));
-  const toClassId = String(formData.get("toClassId"));
-  if (!toClassId) return;
+  const parsed = parseForm(TransferForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId, toClassId } = parsed.data;
 
   await asUser(staff.authUserId, async (tx) => {
     const [enrollment] = await tx<

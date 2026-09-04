@@ -87,6 +87,35 @@ const PATHS = {
       <path d="M12 9v4M12 17h.01" />
     </>
   ),
+  child: (
+    <>
+      <circle cx="12" cy="7" r="3.4" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3.5" y="5" width="17" height="16" rx="2.5" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+      <path d="m3 7 9 6 9-6" />
+    </>
+  ),
+  note: (
+    <>
+      <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3h11A1.5 1.5 0 0 1 19 4.5v15L12 16l-7 3.5z" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+      <path d="M21 4v5h-5" />
+    </>
+  ),
   check: <path d="m4 12.5 5 5L20 6.5" />,
   up: <path d="M12 19V5m0 0-6 6m6-6 6 6" />,
   down: <path d="M12 5v14m0 0 6-6m-6 6-6-6" />,
@@ -262,4 +291,39 @@ export function ago(minutes: number) {
   if (minutes < 60) return `${minutes}m ago`;
   if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h ago`;
   return `${Math.floor(minutes / 1440)}d ago`;
+}
+
+/**
+ * A search box that submits as a GET, so the result is a real URL.
+ *
+ * Staff share links to each other. "The Kealoha family" pasted into a chat
+ * should open the same thing for the person receiving it, which a client side
+ * filter cannot do.
+ */
+export function PageSearch({
+  action,
+  q,
+  placeholder,
+}: {
+  action: string;
+  q?: string;
+  placeholder: string;
+}) {
+  return (
+    <form className="flex gap-2" action={action}>
+      <div className="relative max-w-md flex-1">
+        <input
+          name="q"
+          defaultValue={q ?? ""}
+          placeholder={placeholder}
+          className="ops-field w-full pl-8"
+          aria-label="Search"
+        />
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ops-faint)]">
+          <Icon name="search" size={14} />
+        </span>
+      </div>
+      <button className="ops-btn">Search</button>
+    </form>
+  );
 }

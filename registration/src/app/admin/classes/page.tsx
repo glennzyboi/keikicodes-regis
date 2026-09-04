@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatMoney } from "@/lib/stripe";
 import { readAsStaff, classRows } from "../queries";
 import { Icon, PageHead, Pill, when } from "../ui";
@@ -40,7 +41,12 @@ export default async function Classes() {
             <section key={c.id} className="ops-panel ops-enter p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-medium">{c.title}</p>
+                  <Link
+                    href={`/admin/classes/${c.id}`}
+                    className="font-medium underline decoration-transparent underline-offset-2 hover:decoration-inherit"
+                  >
+                    {c.title}
+                  </Link>
                   <p className="ops-mono truncate">
                     {c.school} ·{" "}
                     {c.next_session_at

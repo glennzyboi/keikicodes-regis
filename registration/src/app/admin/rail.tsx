@@ -14,12 +14,18 @@ type Item = {
 };
 
 /**
- * The rail.
+ * The rail, grouped by the job someone came here to do.
  *
- * Each section is its own route rather than an anchor into one long page. The
- * console was a single scroll and it read as a wall; splitting it means someone
- * dealing with refunds is looking at refunds and nothing else, and the badge
- * tells them whether the other queues need them yet.
+ * The console started as one long page of queues, which reads as a wall. The
+ * grouping is deliberate and matches how an office actually splits the day:
+ *
+ *   Today      things that are stuck and need a decision now
+ *   People     answering the phone, which means finding a family fast
+ *   Programs   the classes themselves, their rosters and their calendar
+ *   Comms      what we have told families, and whether it arrived
+ *
+ * Badges only appear when the number is actionable. A count of how many classes
+ * exist is furniture; a count of refunds that failed at Stripe is a queue.
  */
 export function Rail({
   counts,
@@ -30,7 +36,7 @@ export function Rail({
 }) {
   const pathname = usePathname();
 
-  const work: Item[] = [
+  const today: Item[] = [
     { href: "/admin", label: "Overview", icon: "grid" },
     {
       href: "/admin/payments",
@@ -55,9 +61,25 @@ export function Rail({
     },
   ];
 
-  const capacity: Item[] = [
-    { href: "/admin/holds", label: "Seat holds", icon: "clock", count: counts.holds, tone: "quiet" },
+  const people: Item[] = [
+    { href: "/admin/families", label: "Families", icon: "users", count: counts.families, tone: "quiet" },
+    { href: "/admin/students", label: "Students", icon: "child", count: counts.students, tone: "quiet" },
+  ];
+
+  const programs: Item[] = [
     { href: "/admin/classes", label: "Classes", icon: "book", count: counts.classes, tone: "quiet" },
+    { href: "/admin/schedule", label: "Schedule", icon: "calendar" },
+    { href: "/admin/holds", label: "Seat holds", icon: "clock", count: counts.holds, tone: "quiet" },
+  ];
+
+  const comms: Item[] = [
+    {
+      href: "/admin/notifications",
+      label: "Outbox",
+      icon: "mail",
+      count: counts.outbox,
+      tone: counts.outbox > 0 ? "warn" : "quiet",
+    },
   ];
 
   return (
@@ -73,8 +95,10 @@ export function Rail({
         <span className="ops-mono ml-auto">test</span>
       </div>
 
-      <Group label="Needs a decision" items={work} pathname={pathname} />
-      <Group label="Capacity" items={capacity} pathname={pathname} />
+      <Group label="Today" items={today} pathname={pathname} />
+      <Group label="People" items={people} pathname={pathname} />
+      <Group label="Programs" items={programs} pathname={pathname} />
+      <Group label="Comms" items={comms} pathname={pathname} />
 
       <div className="ops-rail-foot">
         <div className="flex items-center gap-2.5">
@@ -106,7 +130,7 @@ function Group({
       <div className="space-y-0.5">
         {items.map((item) => {
           // Overview is the index, so it only matches exactly. Everything else
-          // stays lit while you are anywhere inside it.
+          // stays lit while you are anywhere inside it, including detail pages.
           const active =
             item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
           return (

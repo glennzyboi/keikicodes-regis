@@ -329,3 +329,144 @@ export async function rescheduleSession(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/admin/classes");
 }
+
+/**
+ * Log a contact with a family.
+ *
+ * Append only. A note records what someone believed at the time, so a
+ * correction is another note rather than an edit that quietly rewrites what the
+ * office thought last Tuesday.
+ */
+export async function addSupportNote(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const parentId = String(formData.get("parentId"));
+  const childId = String(formData.get("childId") ?? "") || null;
+  const kind = String(formData.get("kind") ?? "note");
+  const body = String(formData.get("body") ?? "").trim();
+
+  if (!body) return;
+
+  await asUser(staff.authUserId, async (tx) => {
+    await tx`insert into support_notes
+               (parent_id, child_id, kind, body, author_id, author_email)
+             values (${parentId}, ${childId}, ${kind}, ${body}, ${staff.id}, ${staff.email})`;
+  });
+
+  revalidatePath(`/admin/families/${parentId}`);
+}
+
+/**
+ * Put a failed message back on the queue.
+ *
+ * Resets the attempt counter, because the reason it failed five times is
+ * usually now fixed, and leaving it exhausted means it never moves again.
+ */
+export async function requeueNotification(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const id = String(formData.get("notificationId"));
+
+  await asUser(staff.authUserId, async (tx) => {
+    await tx`update notifications
+                set status = 'queued', attempts = 0, locked_at = null,
+                    scheduled_for = now(), last_error = null
+              where id = ${id} and status in ('failed', 'cancelled')`;
+  });
+
+  revalidatePath("/admin/notifications");
+  revalidatePath("/admin/families", "layout");
+}
+
+/** Stop a queued message that should not go out after all. */
+export async function cancelNotification(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const id = String(formData.get("notificationId"));
+
+  await asUser(staff.authUserId, async (tx) => {
+    await tx`update notifications set status = 'cancelled'
+              where id = ${id} and status = 'queued'`;
+  });
+
+  revalidatePath("/admin/notifications");
+}
+
+/**
+ * Move a child from one class to another, mid term.
+ *
+ * The common real request: a clash with swimming, a sibling in a different
+ * class, a child who has outgrown the beginner group. Done as one transaction
+ * so the seat cannot be released in the old class without being taken in the
+ * new one.
+ *
+ * Money is deliberately not touched. Prices differ between classes, and whether
+ * that is a refund, a top up or a goodwill move is a decision for a person, not
+ * a rule this function should invent.
+ */
+export async function transferEnrollment(formData: FormData): Promise<void> {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const enrollmentId = String(formData.get("enrollmentId"));
+  const toClassId = String(formData.get("toClassId"));
+  if (!toClassId) return;
+
+  await asUser(staff.authUserId, async (tx) => {
+    const [enrollment] = await tx<
+      { id: string; class_offering_id: string; child_id: string }[]
+    >`select id, class_offering_id, child_id from enrollments
+       where id = ${enrollmentId} and status in ('active','cancellation_requested')
+       for update`;
+    if (!enrollment) return;
+
+    if (enrollment.class_offering_id === toClassId) return;
+
+    // Same guard as a fresh registration. A transfer must not oversell the
+    // class it is moving into.
+    const [{ take_seat: got }] = await tx<{ take_seat: boolean }[]>`
+      select take_seat(${toClassId})`;
+    if (!got) return;
+
+    // The child cannot already hold a live place in the destination.
+    const [clash] = await tx<{ id: string }[]>`
+      select id from enrollments
+       where child_id = ${enrollment.child_id}
+         and class_offering_id = ${toClassId}
+         and status in ('active','cancellation_requested')`;
+    if (clash) {
+      await tx`select release_seat(${toClassId})`;
+      return;
+    }
+
+    // Start them at the next session that has not happened yet, which is what
+    // "joining mid semester" means in the schema.
+    const [nextSession] = await tx<{ id: string }[]>`
+      select id from sessions
+       where class_offering_id = ${toClassId} and status = 'scheduled'
+         and starts_at >= now()
+       order by starts_at asc limit 1`;
+
+    await tx`update enrollments
+                set class_offering_id = ${toClassId},
+                    starts_from_session_id = ${nextSession?.id ?? null}
+              where id = ${enrollmentId}`;
+
+    await tx`select release_seat(${enrollment.class_offering_id})`;
+
+    await tx`insert into enrollment_events (enrollment_id, event, payload)
+             values (${enrollmentId}, 'transferred',
+                     ${JSON.stringify({
+                       by: staff.email,
+                       from: enrollment.class_offering_id,
+                       to: toClassId,
+                     })}::text::jsonb)`;
+
+  });
+
+  revalidatePath("/admin/families", "layout");
+  revalidatePath("/admin/classes", "layout");
+}

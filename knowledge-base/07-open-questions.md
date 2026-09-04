@@ -6,11 +6,14 @@ and belong in the Loom rather than in a message.
 
 ## Ask now
 
-1. **Waitlist or a clean stop?** When a class is full, should a parent hit "class is full" and
-   stop, or join a waitlist? Not mentioned in the brief. Scoping it changes what gets built.
-2. **Cancellation semantics.** Reading their brief, a parent *requests* and staff approve. Confirm
-   that is right rather than self-service.
-3. Confirm the Wise details and the delivery date.
+1. ~~**Waitlist or a clean stop?**~~ **Decided: out of scope.** Never mentioned in their brief,
+   confirmed by re-reading it. A full class says so and stops. It is a sentence Glenn says in the
+   Loom, not code.
+2. ~~**Cancellation semantics.**~~ **Built as request then approve**, which is what their brief
+   describes. The seat stays held while the office decides, and approving is the only thing that
+   releases it. Still worth confirming out loud in the walkthrough.
+3. **Confirm the Wise details and the delivery date.** Still outstanding. Glenn has been asked
+   twice for the Wise email or phone and has not answered.
 
 ## Ask before building it for real
 

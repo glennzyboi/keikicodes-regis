@@ -128,6 +128,16 @@ Fifty simultaneous registrations against a twelve seat class. Expect exactly the
 free seats accepted, everyone else told the class is full, and zero other
 failures.
 
+If the class already has people in it, reseed first so there are twelve free
+seats, or pass `--class "Web Design Basics"` to pick an emptier one. The script
+says up front how many seats were free, and adapts its checks.
+
+It drives the registration transaction directly rather than posting to the API,
+because registration requires an account and driving fifty signed in sessions
+from a CLI means reimplementing Supabase's cookie format. **The HTTP path is
+proven separately**, by a test in `tests/jobs.spec.ts` that races eight real
+signed in browser contexts through the endpoint.
+
 ### 6. Prove reminders cannot double send
 
 ```bash
@@ -166,8 +176,21 @@ set -a && . ./.env.local && set +a
 ./node_modules/.bin/playwright test
 ```
 
-Four specs, each paying with a real test card against real Stripe. The suite
-reseeds first, so it never inherits the state of the previous run.
+**61 specs across five files**, taking about three minutes. Several pay with a
+real test card against real Stripe, and one issues a real refund.
+
+| File | What it is for |
+|---|---|
+| `auth.spec.ts` | Signed out, wrong role, and one family reaching for another's data |
+| `abuse.spec.ts` | Malformed ids, rubbish payloads, injection, open redirects |
+| `admin.spec.ts` | Every console tab, checked against the database |
+| `parent.spec.ts` | Signup through cancellation, and the full money lifecycle |
+| `jobs.spec.ts` | The background scripts, plus eight browser contexts racing |
+
+Run one file at a time with `./node_modules/.bin/playwright test tests/auth.spec.ts`.
+
+The suite reseeds in global setup, so it never inherits the previous run, and
+the two tests that fill a class put it back afterwards.
 
 ---
 

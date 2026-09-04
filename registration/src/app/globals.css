@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+/*
+  Keiki Coders brand, taken from their live site rather than invented.
+  Source: static1.squarespace.com/static/custom-css/6523a780f28838549671e2dc/.../custom.css
+  Full token list in ../../knowledge-base/06-brand-tokens.md
+*/
+@theme {
+  --font-display: var(--font-fredoka), ui-rounded, system-ui, sans-serif;
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+
+  --color-ink: #06231c;
+  --color-ink-soft: #4a5551;
+  --color-green-900: #0f5740;
+  --color-green-700: #1b7a5a;
+  --color-green-600: #2c7a5d;
+  --color-green-500: #2e9e74;
+  --color-green-100: #eef3f0;
+  --color-green-200: #cfe3da;
+  --color-sun: #ffcf33;
+  --color-sun-deep: #e6b800;
+  --color-paper: #ffffff;
+  --color-mist: #f8f9fa;
+  --color-hairline: #ebedee;
+
+  --radius-pill: 999px;
+  --radius-card: 20px;
+  --radius-panel: 24px;
+  --radius-field: 14px;
+
+  /* Their shadows are green-tinted, never neutral grey. */
+  --shadow-card: 0 15px 35px -5px rgb(6 35 28 / 0.08), 0 5px 15px -5px rgb(6 35 28 / 0.04);
+  --shadow-lift: 0 22px 45px -12px rgb(6 35 28 / 0.16);
+  --shadow-badge: 0 10px 20px -8px rgb(27 122 90 / 0.55);
+}
+
+/*
+  Custom curves. The built-in CSS easings are too weak to read as intentional,
+  and ease-in is never used on UI here: it delays the first frame, which is the
+  exact moment the user is looking.
+*/
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-mist);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* ---------------------------------------------------------------- buttons */
+.kc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  padding: 0.8rem 1.6rem;
+  cursor: pointer;
+  /* transform and opacity only: both skip layout and paint */
+  transition: transform 160ms var(--ease-out), background-color 160ms ease,
+    box-shadow 160ms var(--ease-out), opacity 160ms ease;
+}
+.kc-btn:active {
+  /* instant confirmation the interface heard the press */
+  transform: scale(0.97);
+}
+.kc-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+.kc-btn:focus-visible {
+  outline: 3px solid var(--color-green-500);
+  outline-offset: 2px;
+}
+
+.kc-btn-primary {
+  background: var(--color-green-700);
+  color: #fff;
+  box-shadow: var(--shadow-badge);
+}
+.kc-btn-sun {
+  background: var(--color-sun);
+  color: var(--color-ink);
+}
+.kc-btn-quiet {
+  background: transparent;
+  color: var(--color-green-900);
+  border: 2px solid var(--color-green-200);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .kc-btn-primary:hover:not(:disabled) { background: var(--color-green-900); }
+  .kc-btn-sun:hover:not(:disabled) { background: var(--color-sun-deep); }
+  .kc-btn-quiet:hover:not(:disabled) { background: var(--color-green-100); }
+}
+
+/* ---------------------------------------------------------------- surfaces */
+.kc-card {
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  transition: transform 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    box-shadow 300ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .kc-card-interactive:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+
+.kc-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.95em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+  background: rgb(46 158 116 / 0.14);
+  border-radius: var(--radius-pill);
+}
+
+/* Their signature: a tilted green badge behind a key word. */
+.kc-highlight {
+  display: inline-block;
+  padding: 0.04em 0.36em;
+  color: #fff;
+  background: var(--color-green-700);
+  border-radius: 16px;
+  transform: rotate(-2.5deg);
+  box-shadow: var(--shadow-badge);
+}
+
+/* ---------------------------------------------------------------- fields */
+.kc-field {
+  width: 100%;
+  background: var(--color-paper);
+  border: 2px solid var(--color-hairline);
+  border-radius: var(--radius-field);
+  padding: 0.75rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  color: var(--color-ink);
+  transition: border-color 160ms ease, box-shadow 160ms var(--ease-out);
+}
+.kc-field:focus {
+  outline: none;
+  border-color: var(--color-green-500);
+  box-shadow: 0 0 0 4px rgb(46 158 116 / 0.14);
+}
+.kc-label {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-green-900);
+  margin-bottom: 0.4rem;
+}
+
+/* ---------------------------------------------------------------- entrance */
+/*
+  Transitions rather than keyframes, so a re-render mid-animation retargets
+  instead of restarting. Never from scale(0): nothing appears from nothing.
+*/
+.kc-enter {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity 260ms var(--ease-out), transform 260ms var(--ease-out);
+}
+@starting-style {
+  .kc-enter {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* Short stagger. Decorative only, never blocks interaction. */
+.kc-stagger > * { transition-delay: 0ms; }
+.kc-stagger > *:nth-child(2) { transition-delay: 45ms; }
+.kc-stagger > *:nth-child(3) { transition-delay: 90ms; }
+.kc-stagger > *:nth-child(4) { transition-delay: 135ms; }
+.kc-stagger > *:nth-child(5) { transition-delay: 180ms; }
+.kc-stagger > *:nth-child(6) { transition-delay: 225ms; }
+
+/* Reduced motion keeps the fades that aid comprehension, drops the movement. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+  }
+  .kc-btn:active { transform: none; }
+  .kc-card-interactive:hover { transform: none; }
+  @starting-style {
+    .kc-enter { opacity: 0; transform: none; }
+  }
+}

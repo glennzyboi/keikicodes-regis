@@ -5,7 +5,7 @@ import { asUser } from "@keiki/core/rls";
 import { navCounts } from "./queries";
 import { Rail } from "./rail";
 import { signOut } from "./actions";
-import { Icon } from "./ui";
+import { CommandPalette } from "./command-palette";
 
 export const metadata: Metadata = {
   title: "Keiki Coders Ops",
@@ -38,11 +38,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
         <div className="min-w-0">
           <header className="ops-topbar">
-            <div className="ops-search">
-              <Icon name="search" size={14} />
-              <span>Search families, classes, orders</span>
-              <kbd className="ops-kbd">⌘K</kbd>
-            </div>
+            <CommandPalette />
 
             <div className="flex items-center gap-2">
               <span className="ops-pill ops-pill-quiet">

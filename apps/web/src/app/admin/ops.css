@@ -9,7 +9,14 @@
    This file is imported by the admin layout and nowhere else, so the split is
    enforced by the module graph rather than by everyone remembering.
    ===================================================================== */
-.ops {
+/*
+  The tokens live on .ops, which wraps the console. The command palette is
+  portalled onto the body to escape the topbar's backdrop-filter, which puts it
+  outside that element, so it is named here too. Declaring them twice would be
+  two things to keep in step; naming both selectors is one.
+*/
+.ops,
+.ops-palette-backdrop {
   --ops-bg: #f7f8fa;
   --ops-surface: #ffffff;
   --ops-line: #e4e7ec;
@@ -526,4 +533,110 @@
 .ops-warn {
   background: var(--ops-warn-soft);
   color: var(--ops-warn);
+}
+
+/* ------------------------------------------------------- command palette */
+/*
+  Deliberately not animated on open. This is opened dozens of times a day with
+  a parent on the phone, and at that frequency an entrance animation is just a
+  delay between pressing the key and being able to type. The only motion is the
+  row highlight, which is feedback rather than decoration.
+*/
+.ops-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  padding: 12vh 1rem 1rem;
+  background: rgb(6 19 14 / 0.42);
+}
+
+.ops-palette {
+  width: 100%;
+  max-width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ops-panel, #fff);
+  border: 1px solid var(--ops-line);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px -20px rgb(6 19 14 / 0.45);
+  overflow: hidden;
+}
+
+.ops-palette-input {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--ops-line);
+  color: var(--ops-faint);
+}
+.ops-palette-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ops-ink, inherit);
+}
+
+.ops-palette-results {
+  overflow-y: auto;
+  padding: 0.35rem;
+}
+.ops-palette-hint {
+  padding: 1.1rem 0.9rem;
+  color: var(--ops-muted);
+}
+
+.ops-palette-hit {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  /* Colour only. Moving a row under a cursor that is about to click it is a
+     good way to make somebody open the wrong family. */
+  transition: background-color 90ms ease;
+}
+.ops-palette-hit[data-active="true"] {
+  background: var(--ops-good-soft);
+}
+.ops-palette-title {
+  display: block;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ops-palette-sub {
+  display: block;
+  color: var(--ops-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The trigger is a real button now, so it gets a real pressed state. */
+button.ops-search {
+  cursor: pointer;
+  text-align: left;
+}
+button.ops-search:active {
+  transform: scale(0.99);
+}
+@media (prefers-reduced-motion: reduce) {
+  button.ops-search:active {
+    transform: none;
+  }
 }

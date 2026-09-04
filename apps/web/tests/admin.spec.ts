@@ -366,6 +366,88 @@ test.describe("classes", () => {
   });
 });
 
+test.describe("the search box", () => {
+  test("it finds families, children, classes and campuses", async ({ page }) => {
+    // It used to be a div with the words "Search families, classes, orders" and
+    // a fake command-K badge, which is worse than nothing: it tells somebody a
+    // feature exists and then does not do it.
+    const email = `${unique("findme")}@example.test`;
+    await signUpParent(page, email, "Findable Ohana");
+    const target = await freeClass(1);
+    await registerAndPay(page, target, {
+      first: "Findable",
+      last: unique("Kid").replace(/-/g, ""),
+      dob: "2016-02-02",
+    });
+
+    await page.context().clearCookies();
+    await signInStaff(page);
+    await page.goto("/admin");
+
+    await page.locator("button.ops-search").click();
+    const input = page.locator(".ops-palette-input input");
+    await expect(input).toBeFocused();
+
+    await input.fill("Findable");
+    const hits = page.locator(".ops-palette-hit");
+    await expect(hits.first()).toBeVisible();
+
+    // The family and the child both, because the question on the phone is
+    // never "search the families table". The child ranks first, since a name
+    // typed into a search box is usually a person rather than a household.
+    const kinds = await hits.locator(".ops-pill").allTextContents();
+    expect(kinds, "a child and their family both come back").toEqual(
+      expect.arrayContaining(["child", "family"]),
+    );
+    expect(kinds[0], "the child is first").toBe("child");
+
+    // A class, from the same box.
+    await input.fill(target.title.slice(0, 12));
+    await expect(page.locator(".ops-palette-hit").first()).toBeVisible();
+
+    // Enter opens the highlighted row.
+    await input.press("Enter");
+    await expect(page).toHaveURL(/\/admin\/(families|catalogue)\//);
+  });
+
+  test("escape closes it and the keyboard opens it", async ({ page }) => {
+    await signInStaff(page);
+    await page.goto("/admin");
+
+    await page.keyboard.press("Control+k");
+    await expect(page.locator(".ops-palette")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".ops-palette")).toHaveCount(0);
+  });
+
+  test("the search endpoint refuses anyone who is not staff", async ({ page, request }) => {
+    // It returns children's names and family email addresses, so it is exactly
+    // the endpoint somebody would try without signing in.
+    const anon = await request.get("/admin/search?q=kealoha");
+    expect(anon.status(), "signed out is refused").toBe(401);
+
+    await signUpParent(page, `${unique("nosy")}@example.test`, "Nosy Parent");
+    const asParent = await page.request.get("/admin/search?q=kealoha");
+    expect(asParent.status(), "a signed in parent is refused too").toBe(401);
+  });
+
+  test("a short query returns nothing rather than the whole database", async ({ page }) => {
+    await signInStaff(page);
+    const res = await page.request.get("/admin/search?q=a");
+    expect(res.ok()).toBeTruthy();
+    expect((await res.json()).hits).toEqual([]);
+  });
+
+  test("a percent sign is a percent sign, not a wildcard", async ({ page }) => {
+    await signInStaff(page);
+    const res = await page.request.get("/admin/search?q=%25%25%25");
+    expect(res.ok()).toBeTruthy();
+    // Escaped, so it matches literal percent signs, of which there are none.
+    expect((await res.json()).hits).toEqual([]);
+  });
+});
+
 test.describe("schedule", () => {
   test("the calendar renders real sessions and navigates months", async ({ page }) => {
     await signInStaff(page);

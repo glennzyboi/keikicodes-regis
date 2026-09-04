@@ -38,14 +38,15 @@ holds the unsent reply to Peter.
 ## State as of 5 September 2026
 
 Built as a pnpm workspace: a domain package with no framework in it, an API
-service, and the Next.js site. Running locally, covered by **100 passing tests**
+service, and the Next.js site. Running locally, covered by **101 passing tests**
 across auth, deliberate abuse, the catalogue, the public API, every console tab,
 the parent journey and the background jobs. Two consecutive full runs green,
 every database invariant clean.
 
-It runs on **their real catalogue**: 19 campuses, 10 programs, 28 offerings
-imported from their own live endpoints, with the 15 that partner schools enrol
-themselves correctly marked as not ours to sell.
+It runs on **their real catalogue**, imported from their own live endpoints: 19
+campuses on file, 15 of them running something this term, 10 programs and 28
+offerings. Of those offerings, 13 are ours to sell and the other 15 are enrolled
+by the school itself, marked as such and impossible to pay for here.
 
 Not yet done: **record the Loom**, **send the reply to Peter**, and get Glenn's
 **Wise details**. Google sign in and Resend are wired but need credentials.

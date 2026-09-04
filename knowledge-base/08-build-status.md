@@ -105,7 +105,7 @@ pnpm import:catalogue --dry  # run it all in a transaction and keep none of it
 pnpm verify:api              # diff our public API against their n8n webhooks
 pnpm thunder                 # 50 simultaneous registrations against one class
 pnpm notify / reminders / sweep
-pnpm test                    # 100 Playwright specs
+pnpm test                    # 101 Playwright specs
 ```
 
 ---
@@ -192,7 +192,7 @@ Squarespace code block.
 | A paid seat is never swept | proven directly in SQL, and in the suite |
 | Reminders cannot double send | three runs, one email |
 | A child's photo is private | owning family 200, staff 200, another family denied, anonymous denied |
-| The whole thing | **100 specs, two consecutive green runs, every invariant clean** |
+| The whole thing | **101 specs, two consecutive green runs, every invariant clean** |
 
 Invariants checked after a full run, all zero: oversold classes, seats that
 cannot be accounted for, children with two live places, paid orders never
@@ -206,7 +206,7 @@ Current catalogue: 19 schools, 10 programs, 28 offerings, 13 of them sold here,
 
 ## The tests
 
-**100 specs across eight files**, about four minutes. Several pay with a real
+**101 specs across eight files**, about four minutes. Several pay with a real
 test card against real Stripe, and one issues a real refund.
 
 | File | What it is for |

@@ -8,6 +8,12 @@
 > Behind all of that is a system we built ourselves, and it's the reason our teachers can focus
 > on students instead of spreadsheets. You'd own that system.
 
+> **Since verified.** On 5 September their live site was read directly, and the
+> details of how registration and the catalogue actually work are in
+> `11-their-real-system.md`: the n8n webhook endpoints, the Fillout form's
+> field-by-field contents, and where their business rules currently live. That
+> document is concrete where this one is their own summary.
+
 ## The stack, as listed
 
 | Layer | Tool | Their description |

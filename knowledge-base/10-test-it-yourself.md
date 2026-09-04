@@ -207,7 +207,7 @@ set -a && . ./.env.local && set +a
 pnpm test
 ```
 
-**100 specs across eight files**, about four minutes. Several pay with a real
+**101 specs across eight files**, about four minutes. Several pay with a real
 test card, and one issues a real refund.
 
 ---

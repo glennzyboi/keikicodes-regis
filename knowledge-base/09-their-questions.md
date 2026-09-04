@@ -4,33 +4,74 @@
 built and verified, not against what was planned. Every claim here has been
 demonstrated locally and most can be shown live in the walkthrough.*
 
+*Rewritten 5 September 2026, after reading how their system actually works. The
+evidence for that is `11-their-real-system.md`, and it changed several of these
+answers.*
+
+---
+
+## 0. The thing to open with
+
+Before writing any of this I read their live site properly. Their
+`/find-a-program` page is a Squarespace code block calling two self-hosted n8n
+webhooks over Airtable, and `/register` is a Fillout form wired to the same base.
+
+That told me four things the brief did not:
+
+1. **A program is a curriculum, reused.** Thirteen distinct names across
+   twenty-eight offerings; "Code Heroes: Virtual Reality" runs at five campuses
+   with different grades, times and prices.
+2. **Fifteen of your twenty-eight are enrolled on the school's own website.**
+   `cost: null` and a `registerUrl` off your domain are exactly the same
+   thirteen rows, so it is derivable rather than a judgement call.
+3. **A schedule is a first date, a last date, a weekday and a list of holidays.**
+   Twenty-five of twenty-eight carry a `noClass` list.
+4. **You sell by grade, not by age.**
+
+So the demo runs on **your real catalogue**, imported from your own endpoints:
+nineteen campuses, ten programs, twenty-eight offerings. Not six invented
+classes. That is the reason the model looks the way it does, and it is the
+honest answer to "how would you approach this for real": go and look first.
+
 ---
 
 ## 1. Walk us through it, including what tools you used
 
-**Stack, and why each one.**
+**Three packages, two deployables.**
+
+| Package | What it is |
+|---|---|
+| `packages/core` | The domain. Schema access, the registration transaction, refunds, notifications, the jobs, the catalogue importer. No React, no Next. |
+| `apps/api` | A Hono service. Owns Stripe, the public catalogue endpoints, and the background jobs. |
+| `apps/web` | Next.js. The parent site and the office console. |
+
+The split is not decoration. The API service is the only thing holding a Stripe
+secret, the only thing verifying webhook signatures, and the only thing running
+the jobs. If the frontend is compromised tomorrow, nobody can charge a card with
+it.
 
 | Tool | Why |
 |---|---|
-| **Next.js 16, App Router** | Server components mean the registration page renders with live seat counts and no client fetch. Server Actions mean the admin mutates data without hand written API routes. One deployable. |
-| **Postgres via Supabase** | The hard parts of this problem are all database problems: capacity, idempotency, concurrency. Postgres solves them properly. Supabase adds auth and row level security without running my own identity service. |
-| **Stripe Checkout** | Hosted, so card details never touch this system and PCI scope stays where it belongs. Products and Prices mirror our catalogue so the money side is auditable in their own dashboard. |
-| **Supabase Auth** | Email and password today, Google as soon as there are client credentials. Sessions, hashing and rotation are not things worth writing again. |
-| **Resend** | Transactional email. Locally, Mailpit ships with the Supabase stack, so a walkthrough shows real messages in a real inbox without sending anything to a real person. |
-| **postgres.js** | Plain SQL. The interesting logic here is SQL, and hiding it behind an ORM would hide the part that matters. Drizzle is present as a typed mirror for the shape of tables only. |
-| **Playwright** | The tests are evidence rather than coverage. They pay with a real test card against real Stripe and assert the database agrees with the screen. |
+| **Next.js 16, App Router** | Server components mean a class page renders with live seat counts and no client fetch. Server Actions mean the console mutates without hand written API routes. |
+| **Postgres via Supabase** | The hard parts here are all database problems: capacity, idempotency, concurrency, schedules. Supabase adds auth, row level security and storage without running my own identity service. |
+| **Hono** | Small, fast, and it is an HTTP service rather than a framework with opinions about rendering. |
+| **Stripe Checkout** | Hosted, so card details never touch this system. Products and Prices mirror our catalogue so the money is auditable in your own dashboard. |
+| **Resend** | Transactional email. Locally Mailpit ships with the Supabase stack, so the walkthrough shows real messages in a real inbox without mailing a real person. |
+| **postgres.js** | Plain SQL. The interesting logic here is SQL and an ORM would hide the part that matters. There was a typed mirror of the schema; nothing read it and it had already drifted, so it is gone. |
+| **Playwright** | 101 specs. They are evidence rather than coverage: several pay with a real test card against real Stripe and one issues a real refund. |
 
-**Tools, honestly.** This was built with Claude Code doing the typing. That is
-worth saying plainly because it changes what you should look for. The value is
-not in how fast the files appeared, it is in the decisions: taking the seat
-before payment, an outbox rather than an inline send, refusing to let a link be
-a credential. Those are the parts I would defend in review, and the parts I have
-tried to make legible in the comments.
+**Tools, honestly.** This was built with Claude Code doing the typing. Worth
+saying plainly, because it changes what you should look for. The value is not
+that files appeared quickly, it is the decisions: taking the seat before
+payment, an outbox rather than an inline send, refusing to let a link be a
+credential, and reading your live system before designing the schema. Those are
+the parts I would defend in review, and the parts I tried to make legible in the
+comments.
 
 **Two products, one database.** Parents get a branded, friendly site. Staff get
-an operations console with its own design system on its own route group, dark
-rail, Inter at 13px, tabular figures. Their playful rounded type is right for
-selling a class to a parent and wrong for a screen someone reads for eight
+an operations console with its own design system on its own route group: dark
+rail, Inter at 13px, tabular figures. Your playful rounded type is right for
+selling a class to a parent and wrong for a screen somebody reads for eight
 hours.
 
 ---
@@ -38,60 +79,91 @@ hours.
 ## 2. The data model, and why
 
 ```
-schools ──< class_offerings ──< sessions
-                   │
-                   ├──< seat_holds
-                   │
-parents ──< children ──< enrollments >── order_items >── orders
-   │                          │
-   └──< support_notes         └──< enrollment_events
+schools ──┐
+programs ─┼──> class_offerings ──> sessions
+terms ────┘         │    │
+                    │    └──> offering_blackouts
+                    │
+   parents ──> children ──> enrollments ──> order_items ──> orders
+        │            │                          │
+        ├── guardians│                          └──> seat_holds
+        ├── consents └── photo in private storage
+        └── support_notes
 
 notifications  (outbox, references most of the above)
-staff
-webhook_events
+enrollment_events  (append only audit trail)
+staff, webhook_events
 ```
 
 **The decisions worth defending:**
 
-**`class_offerings` is the thing with capacity, not `sessions`.** A child
-registers for a term, not for ten individual Tuesdays. Capacity, price and the
-seat counter live on the offering. Sessions are materialised rows so that one
-date can be cancelled or moved without touching anyone's place.
+**A program is a curriculum; an offering is a program at a campus in a term.**
+This is the change your own data forced. Ten programs behind twenty-eight
+offerings. It also means `class_offerings.title` is the offering's own label
+rather than the program's name, because Liholiho runs one curriculum twice on a
+Thursday afternoon as "(A+ students only)" and "(non A+ students)". Those are
+one course and two classes.
 
-**`seats_taken` is a counter on the row, with a check constraint.** Not a
-`count(*)` over enrollments. Counting is correct and it races: two transactions
-both count eleven and both insert. A single conditional UPDATE cannot.
+**A term is a row with dates, not a string.** In your Fillout form the current
+term is a hardcoded Airtable record id plus the words "Fall 2026" typed into two
+separate filter conditions. Rolling to Spring means editing a form in three
+places and remembering all three. Here it is a boolean with a partial unique
+index, so exactly one term can be current and the database enforces it.
+
+**A schedule is a first date, a last date, a weekday and blackout dates.**
+`generate_sessions()` materialises it. The part that took the care is what it
+must never do: a session somebody cancelled by hand stays cancelled, a
+reschedule is left where it was put, and a date that falls out of range is
+deleted only when nothing references it and cancelled with a reason when
+something does. Holidays become cancelled sessions rather than gaps, so a
+family sees *why* there is no class that week.
+
+**`registration_mode` is on the offering.** Fifteen of yours are enrolled by the
+campus. They are listed so families can find them, marked, linked straight to
+the school, and the registration transaction refuses them outright. A system
+that assumed every class takes money would be wrong about most of your
+catalogue.
+
+**`class_offerings` has the capacity, not `sessions`.** A child registers for a
+term, not for ten individual Tuesdays. Sessions are materialised rows so one
+date can be cancelled without touching anyone's place.
+
+**`seats_taken` is a counter with a check constraint**, not a `count(*)`.
+Counting is correct and it races: two transactions both count eleven and both
+insert. A single conditional UPDATE cannot.
 
 ```sql
 constraint seats_within_capacity check (seats_taken <= capacity)
 ```
 
-That constraint is the invariant of last resort. If every other layer has a bug,
-the database still refuses to oversell.
-
 **`orders` and `order_items` are separate from `enrollments`.** An order is what
-was bought and paid for; an enrollment is a place in a room. They have different
-lifetimes: a place can be cancelled while the order stays as a permanent record
-of money that moved. Collapsing them would mean either deleting payment history
-or keeping ghost enrollments.
+was bought; an enrollment is a place in a room. Different lifetimes: a place can
+be cancelled while the order stays as a permanent record of money that moved.
 
-**`seat_holds` is a table, not a column.** A hold has an expiry and belongs to an
-order item, and something has to be able to sweep it. A `held_until` column on
-the offering could not express two families holding two seats.
+**`seat_holds` is a table, not a column.** A hold has an expiry and belongs to
+an order item, and something has to sweep it. A `held_until` column could not
+express two families holding two seats.
+
+**`consents` is a table, not a boolean.** Your form records agreement as a
+ticked box, so what is stored is "this was ticked at some point, against
+whatever the policy said then". That is not a consent record. Ours stores what
+was agreed, which version, and when. The first time a family disputes a
+cancellation fee, a boolean is worth nothing.
+
+**Grades are smallints with K as 0**, so they sort. A text label like "K-2"
+cannot be compared.
 
 **Natural keys everywhere they exist.** A child is
-`(parent_id, lower(first_name), lower(last_name), date_of_birth)`. A class is
-`(school_id, lower(title), term)`. An order is
-`(parent_id, idempotency_key)`. These are unique indexes, so the "have we seen
-this already" question is answered by Postgres rather than by application code
-that has to remember to ask.
+`(parent_id, lower(first_name), lower(last_name), date_of_birth)`. An offering
+is `(school_id, term_id, lower(title))`. An order is
+`(parent_id, idempotency_key)`. Unique indexes, so "have we seen this already"
+is answered by Postgres rather than by code that has to remember to ask.
 
-**`enrollment_events` is an append only audit trail.** Every decision writes one.
-It is why "who approved this refund" has an answer.
+**`enrollment_events` is append only.** Every decision writes one. It is why
+"who approved this refund" has an answer.
 
 **Money is integer cents. Times are `timestamptz`, rendered in the school's
-timezone.** A parent in Honolulu and a grandparent in Manila must read the same
-class time.
+timezone.** A parent in Honolulu and a grandparent in Manila read the same time.
 
 ---
 
@@ -99,79 +171,89 @@ class time.
 
 **Phase one, one transaction, before any money moves:**
 
-1. **Lock the parent row.** They are signed in, so identity is already settled.
-   `select ... for update` on their row serialises two simultaneous submissions
-   from the same account, which is what makes step 2 safe.
-2. **Check the idempotency key.** If this exact submission already produced an
-   order, return that order and stop.
-3. **Load the classes** and check each is published and open.
-4. **Resolve each child** by natural key, upserting.
-5. **Reject a child already holding a live place** in that class, with a readable
-   message rather than a constraint violation.
-6. **Create the order and its items.**
-7. **Take a seat per item** via `take_seat()`, and create a 30 minute hold.
-   If any seat cannot be taken, throw and roll the whole thing back.
+1. **Lock the parent row.** They are signed in, so identity is settled.
+   `select ... for update` serialises two simultaneous submissions from the same
+   account, which is what makes step 2 safe.
+2. **Check the idempotency key.** If this submission already produced an order,
+   return that order and stop.
+3. **Load the classes** and check each is published, open, and **ours to sell**.
+4. **Check the photograph belongs to this family.** The object key is
+   `<parent id>/<file>`; anything else is refused.
+5. **Resolve each child**, by id if they are already on file, otherwise by
+   natural key.
+6. **Check grade eligibility** against the class's range.
+7. **Reject a child already holding a live place**, and **reject a clash** with
+   anything else they hold, named rather than generic.
+8. **Record the family details**: phone, attribution, marketing choice, second
+   guardian, and the consent with its version.
+9. **Create the order and its items.**
+10. **Take a seat per item** via `take_seat()`, and create a 30 minute hold. If
+    any seat cannot be taken, throw and roll the whole thing back.
 
-**Phase two:** create a Stripe Checkout Session from the stored `stripe_price_id`
-values. Line items are built on the server. Nothing the browser sent can
-influence what is charged.
+**Phase two:** create a Stripe Checkout Session from the stored
+`stripe_price_id` values. Line items are built on the server. Nothing the
+browser sent can influence what is charged.
 
 **Phase three:** the webhook. Signature verified, event id inserted into
 `webhook_events` as a replay guard, then one transaction turns holds into
-enrollments and queues the confirmation email.
+enrollments and queues the confirmation.
 
 ### How do you know if the parent already exists?
 
-They are signed in, so the question is answered before the form is submitted.
-Identity comes from the session and never from the request body, so nobody can
-register children against another account by editing a payload.
+They are signed in, so it is answered before the form is submitted. Identity
+comes from the session and never from the request body, so nobody can register
+children against another account by editing a payload.
 
-At signup, an address that already exists **claims** that record rather than
-creating a second one, so a family that registered before accounts existed is
-not split in two. The claim refuses if the record already belongs to a different
-account.
+At signup an address that already exists **claims** that record rather than
+creating a second one, so a family who registered before accounts is not split
+in two. The claim refuses if the record belongs to a different account.
 
-There is deliberately **no fuzzy matching** on name or phone. A false merge joins
-two families' records, and with children's data that is an incident, not a bug.
-A false split is a support ticket. Take the cheap error.
+There is deliberately **no fuzzy matching** on name or phone. A false merge
+joins two families' records, and with children's data that is an incident, not a
+bug. A false split is a support ticket. Take the cheap error.
 
 ### What if they register two kids in one submission?
 
 One order, two order items, two seats, one payment. Seats are taken in a loop
 inside the same transaction and it is **all or nothing**: if the second child
-cannot get a seat, the first child's seat is released by the rollback. Enrolling
-one and charging for one is a refund conversation and a confused parent on the
-first day of term.
+cannot get a seat, the first child's seat goes back with the rollback.
+
+Worth saying out loud on the Loom: **your form cannot do this.** It is one
+student per submission, so a family with two keiki fills the whole thing in
+twice, retypes both parents, and pays twice. That is the single most visible
+improvement in the build and it cost nothing, because the order model already
+worked that way.
 
 ### Payment succeeds but record creation fails halfway through
 
 **This is why seats are taken before payment rather than after.** By the time
-money moves, the seats are already ours and the order already exists. Fulfilment
+money moves the seats are already ours and the order already exists. Fulfilment
 is not "create everything", it is "flip rows that already exist", which is a much
 smaller thing to get wrong.
 
-If fulfilment throws anyway, the handler returns **500 on purpose** so Stripe
-retries on its own schedule for up to three days. The event id is the primary key
-of `webhook_events`, so a retry that arrives after a partial success cannot double
-enrol. Swallowing the error is the one way to actually lose a paid registration.
+If fulfilment throws anyway the handler returns **500 on purpose**, so Stripe
+retries on its own schedule for up to three days. The event id is the primary
+key of `webhook_events`, so a retry arriving after a partial success cannot
+double enrol. Swallowing the error is the one way to actually lose a paid
+registration.
 
-Meanwhile the order sits in the admin under **Paid, not confirmed**, which is the
-first queue on the page, because money has moved and the system has not caught up.
+Meanwhile the order sits in the console under **Paid, not confirmed**, the first
+queue on the page, because money has moved and the system has not caught up.
 
-One more guard: if a hold has gone missing by the time fulfilment runs, it
-reclaims the seat, and if the class has genuinely filled, it **enrols anyway and
-flags it**. We do not refuse a place to someone who has paid.
+One more guard: if a hold has gone missing by the time fulfilment runs it
+reclaims the seat, and if the class has genuinely filled it **enrols anyway and
+flags it**. We do not refuse a place to somebody who has paid.
 
 ### What if the same submission comes in twice?
 
-The form mints an idempotency key when it opens. A double click, a slow network
-retry, or the browser resubmitting all arrive with the same key, and
-`(parent_id, idempotency_key)` is unique.
+The form mints an idempotency key when it opens. A double click, a slow retry,
+or a resubmission all arrive with the same key, and `(parent_id,
+idempotency_key)` is unique.
 
-There was a real bug here that is worth mentioning. The database side was always
-safe, but both requests then called Stripe with the same idempotency key, and
-Stripe rejects concurrent use of an in-progress key, so the second one 500'd.
-Fixed by serialising the checkout work per order with a row lock.
+There was a real bug here worth mentioning. The database side was always safe,
+but both requests then called Stripe with the same idempotency key, and Stripe
+rejects concurrent use of an in-progress key, so the second 500'd. Fixed by
+serialising the checkout work per order with a row lock.
 
 **Verified:** two concurrent identical submissions produce one order, one seat,
 one parent. It is a Playwright spec.
@@ -188,7 +270,7 @@ update class_offerings
  where id = $1 and seats_taken < capacity;
 ```
 
-Postgres takes a row lock. The 50 transactions queue on that one row, each
+Postgres takes a row lock. The fifty transactions queue on that one row, each
 re-evaluates `seats_taken < capacity` against the committed value, and the
 thirteenth sees 12 and updates zero rows. There is **no read-then-write**, so
 there is no window to lose a race in. The losers are told the class is full
@@ -200,22 +282,39 @@ Three layers, deliberately:
 2. `check (seats_taken <= capacity)` is the invariant of last resort.
 3. A partial unique index stops one child holding two places in the same class.
 
-**Verified, and it is a script you can run:**
+**Verified, and it is a script you can run** (`pnpm thunder`):
 
 ```
-  Scratch Adventures
-  capacity 12, 2 taken, 10 free
+  Code Explorers: Virtual Reality at Nu'uanu Elementary
+  capacity 16, 4 taken, 12 free
   50 parents about to submit at the same moment
 
-  50 requests in 1692ms
+  50 registrations in 1091ms
 
-  accepted            10
-  told class is full  40
+  accepted            12
+  told class is full  38
   anything else       0
 
-  seats_taken         12 / 12
-  live holds          10
+  seats_taken         16 / 16
+  live holds          12
+
+  PASS  accepted exactly the 12 free seats
+  PASS  everyone who missed out was told the class is full
+  PASS  no request failed for any other reason
+  PASS  seats_taken never exceeded capacity
+  PASS  the class is now exactly full
+  PASS  one new hold per accepted registration
 ```
+
+That drives the transaction directly. **The HTTP path is proven separately**, by
+a test that races eight real signed in browser contexts through the endpoint.
+
+Worth admitting on camera: this test was silently proving nothing for a while.
+It ran against whatever class had the most room, and after another test left a
+capacity behind, that class had more free seats than there were parents. Every
+request succeeded, every check passed, and the capacity guard was never
+exercised. It squeezes the class to twelve seats first now. **A concurrency test
+that cannot fail is worse than no concurrency test.**
 
 The same idea appears twice more. The notification worker claims rows with
 `FOR UPDATE SKIP LOCKED`, so two workers never send the same email. Transfers
@@ -225,51 +324,93 @@ take the seat in the destination before releasing it in the origin.
 
 ## 5. What I deliberately left out of v1
 
-- **A waitlist.** Not in the brief. It is one sentence to say and a fortnight to
-  do properly, because it needs offer windows, expiry and a fairness rule.
+- **A waitlist.** Not in the brief, so not built. But your own form proves you
+  need one: there is a step that fires for a single hardcoded Airtable record id
+  containing hand-typed copy about Waikiki being full, a manual waitlist, and
+  reaching out to Principal Ryan. That is the strongest argument for building
+  one properly, and it is a fortnight, because it needs offer windows, expiry
+  and a fairness rule.
 - **Automated refund policy.** The system issues refunds through the Stripe API,
-  but a human chooses the amount. Their real policy is not published anywhere I
+  but a human chooses the amount. Your real policy is not published anywhere I
   could find, and inventing one would be inventing a business rule.
-- **Instructor accounts and attendance.** Real and out of scope. Attendance in
-  particular changes the data model, because it needs a row per child per session.
-- **Discounts, sibling pricing, scholarships.** Every one of these is a pricing
-  policy question, not a code question, and guessing produces the wrong thing.
+- **Instructor accounts and attendance.** Real, and out of scope. Attendance
+  changes the model, because it needs a row per child per session.
+- **Discounts, sibling pricing, scholarships.** Pricing policy questions, not
+  code questions.
 - **SMS.** The notifications table has a channel column and the worker refuses
-  cleanly for anything it has no transport for, so adding Twilio is a file, not a
-  migration. Not built because email covers the cases described.
-- **Self serve class creation.** Staff can cancel, move and transfer. Creating a
-  new term is a seeded operation, because a wrong class definition is expensive
-  and rare enough to be worth a deliberate process.
-- **Payment plans and invoicing.** Real for a $420 program, and a different
+  cleanly for anything with no transport, so Twilio is a file rather than a
+  migration. Email covers the cases described.
+- **Multiple weekdays on one class.** Your `days` field could hold a list; all
+  twenty-eight current offerings are a single day. One weekday, and this note.
+- **Writing back to Airtable.** The import reads only. Two systems that both
+  believe they own the same record is how a migration of this shape dies, and
+  the answer is a direction and a cutover date rather than something clever.
+- **Payment plans and invoicing.** Real for a $425 program, and a different
   system.
+
+**One thing that was on this list and is now built:** self-serve class creation.
+It was going to be left out as "expensive and rare enough to be worth a
+deliberate process". That was wrong, and looking at your Airtable is what
+changed my mind. Your office adds a class, changes a price or closes
+registration in seconds today. A replacement that cannot do that is not a
+replacement, it is a regression with better tests, and it would be abandoned
+inside a month. So the catalogue is fully editable, and the interesting part is
+what it refuses: a capacity below the seats already taken, a price change with
+families already paid, a schedule move without telling the families in it.
 
 ---
 
 ## 6. What I would need to know about your existing system
 
-**The ones that change the design:**
+Four of these I answered myself by reading your site, which is the point.
 
-1. **What is the current source of truth for families and enrollments?** If there
-   is an existing database or a spreadsheet, the migration and the matching rule
-   are the whole first phase. My "no fuzzy matching" position is only safe if I
-   know what the historical data looks like.
-2. **Your refund policy, written down.** Full, pro rata, a cutoff date, a fee?
-   Right now the office chooses per case, which is honest but does not scale.
-3. **Do you already take payment somewhere?** If there is a live Stripe account
-   with customers and history, this needs to attach to it rather than create a
-   parallel one, and the Product and Price mirroring changes.
-4. **How do schools give you rosters and calendars?** If Iolani sends a
-   spreadsheet in July, that is an import, and holidays come from their calendar
-   rather than being typed in.
-5. **Who is staff, and what may each of them do?** Right now staff is one role.
-   If instructors should see their own roster but not payment history, that is a
-   permissions model, and it is much cheaper to build before there is data.
-6. **What are your obligations around children's data?** Retention, who may see
-   medical notes, what happens when a family leaves. This is the question that
-   most changes the schema, and the one most likely to be answered by a rule you
-   already follow but have never written down.
-7. **Where does this need to live?** Vercel plus Supabase is a twenty minute
-   deploy. If it has to sit inside an existing site or a specific host, that is
-   worth knowing before rather than after.
-8. **What breaks today?** The most useful answer is usually the thing the office
-   does every week that they have stopped complaining about.
+**Already answered, and built on:**
+
+- What the catalogue looks like: nineteen campuses, ten programs, twenty-eight
+  offerings, and the fifteen that schools enrol themselves.
+- How a schedule is expressed: dates, a weekday, and a holiday list. Verified
+  against the session counts you publish; **twenty-eight of twenty-eight
+  reconcile.**
+- Where the data comes from: two n8n webhooks over Airtable. Our public API
+  answers in the same shape, so pointing your site here is one line in a
+  Squarespace code block.
+- What your registration form collects. Ours collects every field of it.
+
+**Still need you:**
+
+1. **Capacity.** The one number your public endpoint does not publish, so every
+   imported class landed on a default and the import report says so by name. It
+   is also the number the whole seat model turns on.
+2. **Your refund policy, written down.** Full, pro rata, a cutoff, a fee? Today
+   the office chooses per case, which is honest but does not scale.
+3. **The current source of truth for families and enrollments.** The Airtable
+   base itself, not the public view of it. The migration and the matching rule
+   are the whole first phase, and my "no fuzzy matching" position is only safe
+   once I have seen the historical data.
+4. **Your existing Stripe account.** Your form charges through a live Stripe
+   key. If there is history and customers there, this attaches to it rather than
+   creating a parallel one, and the Product mirroring changes.
+5. **Who is staff, and what may each of them do?** Today staff is one role. If
+   instructors should see their own roster but not payment history, that is a
+   permissions model, and it is far cheaper before there is data.
+6. **Your obligations around children's data.** Retention, who may see medical
+   notes and photographs, what happens when a family leaves. This is the
+   question that most changes the schema and the one most likely to be answered
+   by a rule you follow but have never written down.
+7. **What breaks today?** The most useful answer is usually the thing the office
+   does every week and has stopped complaining about. From the outside my guess
+   is rolling a term over, because doing it means editing a form in three
+   places, but you would know.
+
+---
+
+## Things to actually show, in order
+
+1. The front door, on **their real catalogue**. Pick Wai'alae, then Hanahau'oli,
+   which is marked "Enrolled through the school" with no Register button.
+2. `pnpm verify:api` against their live endpoints.
+3. The class editor: the schedule preview counting as you type, the holiday
+   struck through, the capacity refusal.
+4. A registration with two children, one payment, and the email in Mailpit.
+5. `pnpm thunder`.
+6. The import dry run: 28 of 28 reconcile.

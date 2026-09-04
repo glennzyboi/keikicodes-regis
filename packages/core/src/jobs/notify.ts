@@ -19,15 +19,16 @@
  *   3. A worker that dies mid-send leaves rows stuck in 'sending'. Those are
  *      requeued after ten minutes, so a crash costs a delay and not a message.
  */
-import postgres from "postgres";
-import { emailTransport } from "../src/email";
-import { render, type TemplateName } from "../src/templates";
+import { sql } from "../db";
+import { emailTransport } from "../email";
+import { render, type TemplateName } from "../templates";
 
-const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
-const transport = emailTransport();
-
-const watch = process.argv.includes("--watch");
-const dryRun = process.argv.includes("--dry");
+export type NotifyOptions = {
+  /** Render and report, send nothing. */
+  dryRun?: boolean;
+  /** Called with each line, so the CLI prints and the API logs. */
+  log?: (line: string) => void;
+};
 
 type Row = {
   id: string;
@@ -49,11 +50,11 @@ function backoffMinutes(attempts: number) {
   return Math.min(attempts * attempts, 60);
 }
 
-async function drain() {
+async function drain(dryRun: boolean, log: (s: string) => void, transport: ReturnType<typeof emailTransport>) {
   const requeued = await sql<{ requeue_stuck_notifications: number }[]>`
     select requeue_stuck_notifications()`;
   if (requeued[0].requeue_stuck_notifications > 0) {
-    console.log(`${stamp()} requeued ${requeued[0].requeue_stuck_notifications} stuck`);
+    log(`${stamp()} requeued ${requeued[0].requeue_stuck_notifications} stuck`);
   }
 
   const claimed = dryRun
@@ -75,13 +76,13 @@ async function drain() {
       await sql`update notifications
                    set status = 'failed', last_error = ${`render: ${(e as Error).message}`}
                  where id = ${row.id}`;
-      console.log(`${stamp()} RENDER FAILED ${row.template} -> ${row.to_address}`);
+      log(`${stamp()} RENDER FAILED ${row.template} -> ${row.to_address}`);
       continue;
     }
 
     if (dryRun) {
-      console.log(`${stamp()} would send [${row.template}] to ${row.to_address}`);
-      console.log(`           subject: ${rendered.subject}`);
+      log(`${stamp()} would send [${row.template}] to ${row.to_address}`);
+      log(`           subject: ${rendered.subject}`);
       continue;
     }
 
@@ -108,19 +109,19 @@ async function drain() {
                        provider_message_id = ${result.id}, last_error = null,
                        subject = ${rendered.subject}
                  where id = ${row.id}`;
-      console.log(`${stamp()} sent [${row.template}] to ${row.to_address}`);
+      log(`${stamp()} sent [${row.template}] to ${row.to_address}`);
     } else if (row.attempts >= row.max_attempts) {
       await sql`update notifications
                    set status = 'failed', last_error = ${result.error}
                  where id = ${row.id}`;
-      console.log(`${stamp()} GAVE UP [${row.template}] ${row.to_address}: ${result.error}`);
+      log(`${stamp()} GAVE UP [${row.template}] ${row.to_address}: ${result.error}`);
     } else {
       const wait = backoffMinutes(row.attempts);
       await sql`update notifications
                    set status = 'queued', last_error = ${result.error}, locked_at = null,
                        scheduled_for = now() + (${wait} || ' minutes')::interval
                  where id = ${row.id}`;
-      console.log(
+      log(
         `${stamp()} retry in ${wait}m [${row.template}] ${row.to_address}: ${result.error}`,
       );
     }
@@ -129,32 +130,22 @@ async function drain() {
   return claimed.length;
 }
 
-async function main() {
-  console.log(`${stamp()} transport: ${transport.name}${dryRun ? " (dry run)" : ""}`);
+/** Drain the queue once and report how many were handled. */
+export async function runNotify(opts: NotifyOptions = {}): Promise<number> {
+  const dryRun = opts.dryRun ?? false;
+  const log = opts.log ?? ((s: string) => console.log(s));
+  const transport = emailTransport();
+
+  log(`${stamp()} transport: ${transport.name}${dryRun ? " (dry run)" : ""}`);
 
   let total = 0;
-  let batch = await drain();
+  let batch = await drain(dryRun, log, transport);
   total += batch;
   // Keep going while there is work, so a single run empties the queue.
   while (batch === 20) {
-    batch = await drain();
+    batch = await drain(dryRun, log, transport);
     total += batch;
   }
-  if (total === 0) console.log(`${stamp()} nothing due`);
-
-  if (!watch) {
-    await sql.end();
-    return;
-  }
-
-  console.log(`${stamp()} watching, every ten seconds. Ctrl C to stop.`);
-  setInterval(() => {
-    drain().catch((e) => console.error(`${stamp()} drain failed`, e));
-  }, 10_000);
+  if (total === 0) log(`${stamp()} nothing due`);
+  return total;
 }
-
-main().catch(async (e) => {
-  console.error(e);
-  await sql.end();
-  process.exit(1);
-});

@@ -13,12 +13,13 @@
  * will not touch a hold whose order has been paid. See the migration
  * 20260904080000_sweeper_never_touches_paid.sql for why that matters.
  */
-import postgres from "postgres";
+import { sql } from "../db";
 
-const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
-
-const watch = process.argv.includes("--watch");
-const dryRun = process.argv.includes("--dry");
+export type SweepOptions = {
+  /** Show what would be released, change nothing. */
+  dryRun?: boolean;
+  log?: (line: string) => void;
+};
 
 type Pending = {
   title: string;
@@ -42,63 +43,52 @@ async function preview(): Promise<Pending[]> {
      order by h.expires_at asc`;
 }
 
-async function sweepOnce() {
+async function sweepOnce(dryRun: boolean, log: (s: string) => void): Promise<number> {
   const expired = await preview();
 
   const releasable = expired.filter((h) => h.order_status !== "paid");
   const protectedHolds = expired.filter((h) => h.order_status === "paid");
 
   if (expired.length === 0) {
-    console.log(`${stamp()} nothing expired`);
-    return;
+    log(`${stamp()} nothing expired`);
+    return 0;
   }
 
   for (const h of releasable) {
-    console.log(`${stamp()} expired  ${h.child} in ${h.title} (order ${h.order_status})`);
+    log(`${stamp()} expired  ${h.child} in ${h.title} (order ${h.order_status})`);
   }
   for (const h of protectedHolds) {
-    console.log(`${stamp()} PROTECTED ${h.child} in ${h.title}: order is paid, leaving the seat alone`);
+    log(`${stamp()} PROTECTED ${h.child} in ${h.title}: order is paid, leaving the seat alone`);
   }
 
   if (dryRun) {
-    console.log(`${stamp()} dry run, released nothing`);
-    return;
+    log(`${stamp()} dry run, released nothing`);
+    return 0;
   }
 
   const [{ release_expired_holds: released }] = await sql<{ release_expired_holds: number }[]>`
     select release_expired_holds()`;
 
-  console.log(`${stamp()} released ${released} seat${released === 1 ? "" : "s"}`);
+  log(`${stamp()} released ${released} seat${released === 1 ? "" : "s"}`);
 
   if (released > 0) {
     const rows = await sql<{ title: string; capacity: number; seats_taken: number }[]>`
       select title, capacity, seats_taken from class_offerings order by title`;
     for (const r of rows) {
-      console.log(`           ${r.title}: ${r.seats_taken}/${r.capacity}`);
+      log(`           ${r.title}: ${r.seats_taken}/${r.capacity}`);
     }
   }
+
+  return released;
 }
 
 function stamp() {
   return new Date().toISOString().slice(11, 19);
 }
 
-async function main() {
-  await sweepOnce();
-
-  if (!watch) {
-    await sql.end();
-    return;
-  }
-
-  console.log(`${stamp()} watching, one sweep a minute. Ctrl C to stop.`);
-  setInterval(() => {
-    sweepOnce().catch((e) => console.error(`${stamp()} sweep failed`, e));
-  }, 60_000);
+/** Release expired holds once. Returns how many seats came back. */
+export async function runSweep(opts: SweepOptions = {}): Promise<number> {
+  const dryRun = opts.dryRun ?? false;
+  const log = opts.log ?? ((s: string) => console.log(s));
+  return sweepOnce(dryRun, log);
 }
-
-main().catch(async (e) => {
-  console.error(e);
-  await sql.end();
-  process.exit(1);
-});

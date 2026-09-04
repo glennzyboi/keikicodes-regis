@@ -17,13 +17,15 @@
  * In production this is a scheduled job at, say, 7am Honolulu time. Locally it
  * runs on demand so a walkthrough can show it working.
  */
-import postgres from "postgres";
+import { sql } from "../db";
 
-const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
-
-const dryRun = process.argv.includes("--dry");
-const daysIndex = process.argv.indexOf("--days");
-const days = daysIndex === -1 ? 1 : Math.max(1, Number(process.argv[daysIndex + 1] ?? 1));
+export type ReminderOptions = {
+  /** How many days ahead to queue. One is "today", which is the real setting. */
+  days?: number;
+  /** Report what it would queue, write nothing. */
+  dryRun?: boolean;
+  log?: (line: string) => void;
+};
 
 type Target = {
   session_id: string;
@@ -47,7 +49,12 @@ function fmt(d: Date, tz: string, opts: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: tz }).format(d);
 }
 
-async function main() {
+/** Queue day-of reminders. Returns how many were queued. */
+export async function runReminders(opts: ReminderOptions = {}): Promise<number> {
+  const days = Math.max(1, opts.days ?? 1);
+  const dryRun = opts.dryRun ?? false;
+  const log = opts.log ?? ((s: string) => console.log(s));
+
   // "Today" is the school's today, not the server's. A job running on a box in
   // Europe must not decide it is already tomorrow in Honolulu.
   const targets = await sql<Target[]>`
@@ -73,9 +80,8 @@ async function main() {
      order by s.starts_at, p.full_name`;
 
   if (targets.length === 0) {
-    console.log("No sessions in that window with anyone enrolled.");
-    await sql.end();
-    return;
+    log("No sessions in that window with anyone enrolled.");
+    return 0;
   }
 
   let queued = 0;
@@ -85,7 +91,7 @@ async function main() {
     const dedupe = `reminder:${t.session_id}:${t.enrollment_id}`;
 
     if (dryRun) {
-      console.log(`would remind ${t.email} about ${t.title} for ${t.child_name}`);
+      log(`would remind ${t.email} about ${t.title} for ${t.child_name}`);
       continue;
     }
 
@@ -114,20 +120,14 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log(`\n${targets.length} reminder${targets.length === 1 ? "" : "s"} would be queued.`);
+    log(`\n${targets.length} reminder${targets.length === 1 ? "" : "s"} would be queued.`);
   } else {
-    console.log(`Queued ${queued} reminder${queued === 1 ? "" : "s"}.`);
+    log(`Queued ${queued} reminder${queued === 1 ? "" : "s"}.`);
     if (already > 0) {
-      console.log(`${already} were already queued, so they were skipped. That is the dedupe key doing its job.`);
+      log(`${already} were already queued, so they were skipped. That is the dedupe key doing its job.`);
     }
-    console.log(`Run "pnpm notify" to deliver them.`);
+    log(`Run "pnpm notify" to deliver them.`);
   }
 
-  await sql.end();
+  return dryRun ? targets.length : queued;
 }
-
-main().catch(async (e) => {
-  console.error(e);
-  await sql.end();
-  process.exit(1);
-});

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { sql } from "@keiki/core/db";
+import { publicRoutes } from "./routes/public";
 
 /**
  * The API service.
@@ -38,6 +39,8 @@ export function createApp() {
     "/public/*",
     cors({ origin: "*", allowMethods: ["GET", "OPTIONS"], maxAge: 3600 }),
   );
+
+  app.route("/public", publicRoutes);
 
   app.get("/health", async (c) => {
     // A health check that does not touch the database is a health check that

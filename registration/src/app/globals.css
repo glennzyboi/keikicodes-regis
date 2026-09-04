@@ -234,3 +234,126 @@ h1, h2, h3, h4, .font-display {
     .kc-enter { opacity: 0; transform: none; }
   }
 }
+
+/* ---------------------------------------------------------------- surfaces */
+/*
+  Their site is not white on white. Sections sit on a pale green wash, and the
+  hero carries two soft brand-coloured blooms behind the type. Cheap to render,
+  and it stops six white cards on a white page reading as a spreadsheet.
+*/
+.kc-wash {
+  background:
+    radial-gradient(60rem 30rem at 12% -10%, rgb(46 158 116 / 0.10), transparent 60%),
+    radial-gradient(45rem 26rem at 95% 0%, rgb(255 207 51 / 0.16), transparent 62%),
+    var(--color-mist);
+}
+
+.kc-band {
+  background: var(--color-green-100);
+}
+
+/* The eyebrow with their circular logo chip inside it. */
+.kc-eyebrow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.85rem 0.3rem 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-paper);
+  border: 1px solid var(--color-green-200);
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+}
+
+/* A class card, headed by its own colour so programs are told apart at a
+   glance rather than by reading every title. */
+.kc-program {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  transition: transform 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
+}
+@media (hover: hover) {
+  .kc-program:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+.kc-program-band {
+  height: 5px;
+  background: var(--kc-accent, var(--color-green-700));
+}
+.kc-program-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--kc-soft, var(--color-green-100));
+  color: var(--kc-ink, var(--color-green-900));
+}
+
+/* Small factual chips: age range, day, length. */
+.kc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-mist);
+  border: 1px solid var(--color-hairline);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  white-space: nowrap;
+}
+.kc-chip-accent {
+  background: var(--kc-soft, var(--color-green-100));
+  border-color: transparent;
+  color: var(--kc-ink, var(--color-green-900));
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+/* Seats remaining, as a bar rather than only a sentence. */
+.kc-seats {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-green-100);
+  overflow: hidden;
+}
+.kc-seats > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--kc-accent, var(--color-green-700));
+  transition: width 420ms var(--ease-out);
+}
+.kc-seats[data-low="true"] > span { background: var(--color-sun-deep); }
+
+/* The numbered steps in "how it works". */
+.kc-step-number {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--color-sun);
+  color: var(--color-green-900);
+  font-family: var(--font-display);
+  font-weight: 700;
+  box-shadow: 0 8px 16px -8px rgb(230 184 0 / 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-program:hover { transform: none; }
+  .kc-seats > span { transition: none; }
+}

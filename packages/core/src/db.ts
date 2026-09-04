@@ -1,6 +1,4 @@
-import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -26,5 +24,10 @@ export const sql =
 
 if (process.env.NODE_ENV !== "production") globalForDb.sql = sql;
 
-export const db = drizzle(sql, { schema });
-export { schema };
+/**
+ * There is deliberately no ORM layer and no second copy of the schema in
+ * TypeScript. The migrations are the schema; a mirror of them in another
+ * language is one more thing to get out of step, and it did get out of step the
+ * moment holidays made `weeks` untrue. Every query in this codebase is SQL, and
+ * every one of them is readable next to the table it reads.
+ */

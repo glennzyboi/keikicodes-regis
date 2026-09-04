@@ -396,3 +396,196 @@ h1, h2, h3, h4, .font-display {
   background: var(--color-green-700);
   color: #fff;
 }
+
+/* --------------------------------------------------------- labelled field */
+/*
+  .kc-field styles a control. This wraps one together with its label, which is
+  the shape almost every form on the parent side actually needs. Keeping them
+  separate means the plain input case does not have to grow a wrapper it does
+  not want.
+*/
+.kc-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.kc-fieldset > label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+}
+.kc-fieldset > input,
+.kc-fieldset > select,
+.kc-fieldset > textarea {
+  width: 100%;
+  background: var(--color-paper);
+  border: 2px solid var(--color-hairline);
+  border-radius: var(--radius-field);
+  padding: 0.7rem 0.95rem;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  color: var(--color-ink);
+  transition: border-color 160ms ease, box-shadow 160ms var(--ease-out);
+}
+.kc-fieldset > input:focus,
+.kc-fieldset > select:focus,
+.kc-fieldset > textarea:focus {
+  outline: none;
+  border-color: var(--color-green-500);
+  box-shadow: 0 0 0 4px rgb(46 158 116 / 0.14);
+}
+
+/* ------------------------------------------------------------- campus tile */
+/*
+  The tile a parent picks their school from. Scale on press rather than only on
+  hover, because most of these are tapped on a phone in a school car park and a
+  hover state is not felt there at all.
+*/
+.kc-campus {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  height: 100%;
+  text-align: center;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  padding: 1.5rem 1rem 1.25rem;
+  box-shadow: 0 10px 24px -18px rgb(6 35 28 / 0.3);
+  transition:
+    transform 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out),
+    border-color 180ms ease;
+}
+.kc-campus:active {
+  transform: scale(0.985);
+}
+.kc-campus-logo {
+  display: grid;
+  place-items: center;
+  height: 84px;
+  margin-bottom: 0.4rem;
+}
+.kc-campus-logo img {
+  max-height: 84px;
+  max-width: 100%;
+  object-fit: contain;
+}
+.kc-campus-initial {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--color-green-100, #e6f2ed);
+  color: var(--color-green-900);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.6rem;
+}
+.kc-campus-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.02rem;
+  line-height: 1.2;
+  color: var(--color-green-900);
+}
+.kc-campus-meta {
+  font-size: 0.82rem;
+  color: var(--color-ink-soft);
+}
+.kc-campus-seats {
+  margin-top: 0.35rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--color-green-600);
+}
+
+@media (hover: hover) {
+  .kc-campus:hover {
+    transform: translateY(-4px);
+    border-color: var(--color-green-500);
+    box-shadow: 0 18px 34px -20px rgb(6 35 28 / 0.35);
+  }
+}
+
+/* ----------------------------------------------------------- small links */
+.kc-link {
+  color: var(--color-green-700, #1b7a5a);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.kc-link:hover {
+  color: var(--color-green-900);
+}
+.kc-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-green-700, #1b7a5a);
+  transition: color 160ms ease, transform 160ms var(--ease-out);
+}
+.kc-back:hover {
+  color: var(--color-green-900);
+}
+.kc-back:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-campus,
+  .kc-campus:hover,
+  .kc-campus:active,
+  .kc-back:active {
+    transform: none;
+    transition-duration: 1ms;
+  }
+}
+
+/* ------------------------------------------------------------- checkboxes */
+/*
+  A checkbox with real text beside it, which is what a consent actually is.
+  The whole row is the target: a 16px box is a miserable thing to hit on a
+  phone, and these are the boxes a registration cannot proceed without.
+*/
+.kc-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  margin: -0.6rem -0.75rem;
+  border-radius: var(--radius-field);
+  cursor: pointer;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  transition: background-color 160ms ease;
+}
+.kc-check:hover {
+  background: color-mix(in oklab, var(--color-green-100, #e6f2ed) 55%, transparent);
+}
+.kc-check > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.12rem;
+  accent-color: var(--color-green-700, #1b7a5a);
+  cursor: pointer;
+}
+.kc-check > input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-green-500, #2e9e74);
+  outline-offset: 2px;
+}

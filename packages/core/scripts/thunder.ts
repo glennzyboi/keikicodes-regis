@@ -5,9 +5,9 @@
  * same second. This fires N simultaneous registrations at a class with a fixed
  * number of seats and checks that the arithmetic survives it.
  *
- *   pnpm thunder                     50 parents against Scratch Adventures
+ *   pnpm thunder                     50 parents against the emptiest class
  *   pnpm thunder --parents 200       heavier
- *   pnpm thunder --class "Python Starters"
+ *   pnpm thunder --class "Code Heroes: Virtual Reality"
  *
  * What it is proving: seats are taken with a single conditional UPDATE,
  *
@@ -49,19 +49,42 @@ function arg(name: string, fallback: string) {
 }
 
 const parents = Number(arg("parents", "50"));
-const className = arg("class", "Scratch Adventures");
+const className = arg("class", "");
 
 async function main() {
-  const [cls] = await sql<{ id: string; capacity: number; seats_taken: number }[]>`
-    select id, capacity, seats_taken from class_offerings where title = ${className}`;
-  if (!cls) throw new Error(`no class called ${className}`);
+  // Named, or the emptiest class we actually sell. Hardcoding a title meant the
+  // script broke the moment the catalogue became the real one, and a class the
+  // school registers for cannot be bought here at all.
+  const [cls] = className
+    ? await sql<{ id: string; title: string; capacity: number; seats_taken: number }[]>`
+        select id, title, capacity, seats_taken from class_offerings
+         where lower(title) = lower(${className}) and registration_mode = 'keiki_coders'
+         order by capacity - seats_taken desc limit 1`
+    : await sql<{ id: string; title: string; capacity: number; seats_taken: number }[]>`
+        select id, title, capacity, seats_taken from class_offerings
+         where status = 'published' and registration_mode = 'keiki_coders'
+         order by capacity - seats_taken desc limit 1`;
+
+  if (!cls) {
+    throw new Error(
+      className
+        ? `no class we sell called ${className}`
+        : "no published class with a seat in it",
+    );
+  }
+  const target = cls.title;
+
+  // A grade the class will accept, so the eligibility check is not what fails.
+  const [range] = await sql<{ grade_min: number | null; grade_max: number | null }[]>`
+    select grade_min, grade_max from class_offerings where id = ${cls.id}`;
+  const grade = range.grade_min ?? range.grade_max ?? 3;
 
   const seatsFree = cls.capacity - cls.seats_taken;
 
   const [{ holds: holdsBefore }] = await sql<{ holds: number }[]>`
     select count(*)::int as holds from seat_holds where class_offering_id = ${cls.id}`;
 
-  console.log(`\n  ${className}`);
+  console.log(`\n  ${target}`);
   console.log(`  capacity ${cls.capacity}, ${cls.seats_taken} taken, ${seatsFree} free`);
   console.log(`  ${parents} parents about to submit at the same moment\n`);
 
@@ -86,13 +109,18 @@ async function main() {
         registrations: [
           {
             classOfferingId: cls.id,
+            attendsSchoolConfirmed: true,
             child: {
               firstName: `Keiki${i}`,
               lastName: `Thunder${run}`,
               dateOfBirth: "2016-05-05",
+              grade,
+              inAfterschoolCare: false,
             },
           },
         ],
+        agreedToPolicies: true,
+        marketingOptIn: false,
       }).catch((e: unknown) => ({
         ok: false as const,
         reason: "threw" as const,

@@ -1,29 +1,34 @@
 /**
- * Seed the local database.
+ * Put the database into a known, demonstrable state.
  *
- * Creates the catalogue, materialises every session, mirrors each class into
- * Stripe as a Product and a Price, and creates one staff login.
+ * The catalogue is no longer invented. It is imported from Keiki Coders' own
+ * published records, so the demo runs on 19 real campuses and 28 real
+ * offerings, with their real grades, times, terms, holidays and prices, and
+ * with the 15 offerings that their partner schools register themselves
+ * correctly marked as not ours to sell. Six imaginary classes proved nothing
+ * about whether the model fits their business.
  *
- *   pnpm seed
+ * What this script owns beyond the import:
  *
- * Safe to re-run, and re-running keeps the same class ids.
+ *   - clearing the operational tables, so a run never inherits the last one
+ *   - pruning offerings that are no longer in their catalogue
+ *   - mirroring the sellable offerings into Stripe as Products and Prices
+ *   - the two logins the demo is driven with
  *
- * That last part matters more than it sounds. This used to truncate the
- * catalogue and insert fresh rows, which minted a new uuid for every class on
- * every run. The Playwright suite reseeds in global setup, so running the tests
- * invalidated every /register/<id> link anyone had open, and clicking Register
- * returned a 404. The catalogue is now upserted on its natural key, campus plus
- * title plus term, so ids survive.
+ * The catalogue is upserted on its natural key rather than recreated, so class
+ * ids survive a reseed and a link somebody has open still resolves. That was a
+ * real bug once: reseeding minted new ids and every open registration page
+ * 404ed.
  *
- * Only the operational tables are cleared: families, orders, holds and
- * enrollments. Nothing in Stripe is deleted, because Stripe objects are
- * archived rather than deleted, which is exactly the behaviour we want from a
- * system of record for money. Stable class ids also stop it creating a
- * duplicate Product and Price on every run.
+ * Nothing in Stripe is ever deleted. Stripe objects are archived rather than
+ * removed, which is exactly the behaviour you want from a system of record for
+ * money.
  */
 import postgres from "postgres";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { importCatalogue } from "../src/catalogue/import";
+import { chooseSource, printReport } from "./import-catalogue";
 
 const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -44,151 +49,27 @@ const DEMO_PARENT_EMAIL = "parent@keikicoders.test";
 const DEMO_PARENT_PASSWORD = "KeikiParent!2026";
 const DEMO_PARENT_NAME = "Malia Kealoha";
 
-/** Schools named publicly on keikicoders.com as partner campuses. */
-const SCHOOLS = [
-  { name: "Iolani School" },
-  { name: "Maryknoll School" },
-  { name: "Kalani High School" },
-];
-
-type ClassSeed = {
-  school: string;
-  title: string;
-  summary: string;
-  weekday: number; // 0 Sunday .. 6 Saturday
-  start: string;
-  end: string;
-  weeks: number;
-  firstSession: string;
-  capacity: number;
-  priceCents: number;
-};
-
 /**
- * Their own example from the brief is "Tuesdays 3-4pm for 10 weeks", so the
- * flagship class uses exactly that, at exactly 12 seats, which is the number
- * in their oversell question.
- */
-const CLASSES: ClassSeed[] = [
-  {
-    school: "Iolani School",
-    title: "Scratch Adventures",
-    summary: "First code. Storytelling, loops and characters in Scratch. Ages 6 to 9.",
-    weekday: 2,
-    start: "15:00",
-    end: "16:00",
-    weeks: 10,
-    firstSession: "2026-09-15",
-    capacity: 12,
-    priceCents: 32000,
-  },
-  {
-    school: "Iolani School",
-    title: "Roblox Studio Lab",
-    summary: "Build and publish a playable world. Lua scripting from scratch. Ages 9 to 13.",
-    weekday: 4,
-    start: "15:15",
-    end: "16:30",
-    weeks: 10,
-    firstSession: "2026-09-17",
-    capacity: 16,
-    priceCents: 38000,
-  },
-  {
-    school: "Maryknoll School",
-    title: "Minecraft Modding",
-    summary: "Write real mods, break things, fix them. Ages 9 to 13.",
-    weekday: 3,
-    start: "15:00",
-    end: "16:00",
-    weeks: 10,
-    firstSession: "2026-09-16",
-    capacity: 14,
-    priceCents: 34000,
-  },
-  {
-    school: "Maryknoll School",
-    title: "Robotics with LEGO SPIKE",
-    summary: "Build a robot, program it, race it. Teams of two. Ages 8 to 12.",
-    weekday: 1,
-    start: "15:30",
-    end: "17:00",
-    weeks: 8,
-    firstSession: "2026-09-14",
-    capacity: 10,
-    priceCents: 42000,
-  },
-  {
-    school: "Kalani High School",
-    title: "Python Starters",
-    summary: "Real Python, real programs. Ages 12 and up.",
-    weekday: 2,
-    start: "16:00",
-    end: "17:15",
-    weeks: 10,
-    firstSession: "2026-09-15",
-    capacity: 18,
-    priceCents: 36000,
-  },
-  {
-    school: "Kalani High School",
-    title: "Web Design Basics",
-    summary: "HTML, CSS and a site of their own online by week ten. Ages 11 and up.",
-    weekday: 4,
-    start: "16:00",
-    end: "17:00",
-    weeks: 10,
-    firstSession: "2026-09-17",
-    capacity: 20,
-    priceCents: 33000,
-  },
-];
-
-/**
- * Sessions are materialised rows rather than a recurrence rule evaluated at read
- * time, because holidays cancel one week and reschedules move another. An
- * exception needs somewhere to live.
- */
-function sessionDates(firstSession: string, weeks: number, start: string, end: string) {
-  const out: { seq: number; startsAt: Date; endsAt: Date }[] = [];
-  for (let i = 0; i < weeks; i++) {
-    const day = new Date(`${firstSession}T00:00:00-10:00`); // Hawaii has no DST
-    day.setUTCDate(day.getUTCDate() + i * 7);
-    const iso = day.toISOString().slice(0, 10);
-    out.push({
-      seq: i + 1,
-      startsAt: new Date(`${iso}T${start}:00-10:00`),
-      endsAt: new Date(`${iso}T${end}:00-10:00`),
-    });
-  }
-  return out;
-}
-
-/**
- * Create the auth user if it is missing, reset the password if it is not.
- * Re-running the seed should always leave a login that actually works, even if
- * someone changed the password while poking at the system.
+ * Create the auth user, or reset its password if it is already there.
+ *
+ * listUsers() is paginated, which broke this once: after a few suite runs the
+ * ops account fell off the first page and the seed tried to create an account
+ * that already existed. Asking Postgres is both correct and cheaper.
  */
 async function ensureAuthUser(
   email: string,
   password: string,
   metadata: Record<string, unknown>,
-) {
-  // Looked up in the database rather than with listUsers().
-  //
-  // listUsers is paginated and defaults to the first fifty. Once a machine has
-  // run the test suite a few times there are more auth users than that, the
-  // staff account falls off page one, and the seed tries to create an account
-  // that already exists and fails. Asking Postgres directly is exact and does
-  // not care how many users there are.
+): Promise<string> {
   const [existing] = await sql<{ id: string }[]>`
-    select id from auth.users where lower(email) = ${email.toLowerCase()}`;
+    select id from auth.users where lower(email) = lower(${email}) limit 1`;
 
   if (existing) {
-    await admin.auth.admin.updateUserById(existing.id, {
+    const { error } = await admin.auth.admin.updateUserById(existing.id, {
       password,
       user_metadata: metadata,
     });
+    if (error) throw error;
     return existing.id;
   }
 
@@ -203,87 +84,80 @@ async function ensureAuthUser(
 }
 
 async function main() {
-  // Families, money and seats go. The catalogue stays, and is updated in place.
+  const useSnapshot = process.argv.includes("--snapshot");
+
+  // Families, money and seats go. The catalogue stays and is updated in place.
   console.log("Clearing families, orders and seats...");
   await sql`truncate table enrollment_events, webhook_events, seat_holds, enrollments,
-            order_items, orders, children, parents
+            order_items, orders, consents, guardians, children, parents,
+            notifications, support_notes
             restart identity cascade`;
   await sql`update class_offerings set seats_taken = 0`;
 
-  console.log("Upserting schools...");
-  const schoolIds = new Map<string, string>();
-  for (const s of SCHOOLS) {
-    const [row] = await sql<{ id: string }[]>`
-      insert into schools (name, timezone) values (${s.name}, 'Pacific/Honolulu')
-      on conflict (lower(name)) do update set timezone = excluded.timezone
-      returning id`;
-    schoolIds.set(s.name, row.id);
+  console.log("Importing their catalogue...");
+  const source = await chooseSource(!useSnapshot);
+  const report = await importCatalogue({ source });
+  printReport(report);
+
+  // Anything we hold that is no longer in their catalogue. Safe here because
+  // the operational tables were just emptied; in the admin console the same
+  // decision is a human's, not a script's.
+  const keep = report.offerings.map((o) => o.id);
+  const stale = await sql<{ id: string; title: string }[]>`
+    delete from class_offerings c
+     where c.id <> all(${sql.array(keep)}::uuid[])
+    returning c.id, c.title`;
+  const staleSchools = await sql<{ id: string }[]>`
+    delete from schools s
+     where s.id <> all(${sql.array(report.schoolIds)}::uuid[])
+    returning s.id`;
+  const orphanPrograms = await sql<{ id: string }[]>`
+    delete from programs p
+     where not exists (select 1 from class_offerings c where c.program_id = p.id)
+    returning p.id`;
+  if (stale.length || orphanPrograms.length || staleSchools.length) {
+    console.log(
+      `Pruned ${stale.length} offerings, ${orphanPrograms.length} programs and ` +
+        `${staleSchools.length} schools no longer in their catalogue.`,
+    );
   }
 
-  console.log("Upserting classes, sessions and Stripe prices...");
-  for (const c of CLASSES) {
-    // Upsert on the natural key, so the id is the one it had last time.
-    const [cls] = await sql<
-      { id: string; stripe_product_id: string | null; stripe_price_id: string | null }[]
-    >`
-      insert into class_offerings
-        (school_id, title, summary, term, weekday, start_time, end_time, weeks,
-         first_session_date, capacity, price_cents, registration_opens_at, status)
-      values
-        (${schoolIds.get(c.school)!}, ${c.title}, ${c.summary}, 'Fall 2026', ${c.weekday},
-         ${c.start}, ${c.end}, ${c.weeks}, ${c.firstSession}, ${c.capacity},
-         ${c.priceCents}, now() - interval '1 day', 'published')
-      on conflict (school_id, lower(title), term) do update
-        set summary = excluded.summary,
-            weekday = excluded.weekday,
-            start_time = excluded.start_time,
-            end_time = excluded.end_time,
-            weeks = excluded.weeks,
-            first_session_date = excluded.first_session_date,
-            capacity = excluded.capacity,
-            price_cents = excluded.price_cents,
-            registration_opens_at = excluded.registration_opens_at,
-            status = excluded.status
-      returning id, stripe_product_id, stripe_price_id`;
+  // Stripe mirrors the catalogue; our database owns it. Only the offerings we
+  // actually sell get a Product, because minting one for a class a partner
+  // school registers would be an invitation to charge for it by accident.
+  console.log("Mirroring sellable offerings into Stripe...");
+  const sellable = await sql<
+    {
+      id: string;
+      title: string;
+      school: string;
+      summary: string | null;
+      price_cents: number;
+      stripe_product_id: string | null;
+      stripe_price_id: string | null;
+    }[]
+  >`select c.id, c.title, s.name as school, c.summary, c.price_cents,
+           c.stripe_product_id, c.stripe_price_id
+      from class_offerings c join schools s on s.id = c.school_id
+     where c.registration_mode = 'keiki_coders' and c.price_cents is not null
+     order by s.name, c.title`;
 
-    // Sessions are keyed by sequence within the class, so a reseed rewrites the
-    // dates in place rather than stacking a second term on top of the first.
-    const dates = sessionDates(c.firstSession, c.weeks, c.start, c.end);
-    for (const s of dates) {
-      await sql`insert into sessions (class_offering_id, seq, starts_at, ends_at, status)
-                values (${cls.id}, ${s.seq}, ${s.startsAt}, ${s.endsAt}, 'scheduled')
-                on conflict (class_offering_id, seq) do update
-                  set starts_at = excluded.starts_at,
-                      ends_at = excluded.ends_at,
-                      status = 'scheduled',
-                      rescheduled_from = null,
-                      note = null`;
-    }
-    // Anything left from a longer previous term, or from a reschedule.
-    await sql`delete from sessions
-               where class_offering_id = ${cls.id} and seq > ${dates.length}`;
+  for (const c of sellable) {
+    let productId = c.stripe_product_id;
+    let priceId = c.stripe_price_id;
 
-    // Our database owns the class. Stripe mirrors it, and holds the money truth.
-    // Reuse the existing Product and Price when the amount has not moved: a new
-    // Price for an unchanged amount is clutter in an account that is meant to be
-    // a system of record.
-    let productId = cls.stripe_product_id;
-    let priceId = cls.stripe_price_id;
-
-    const currentPrice = priceId
-      ? await stripe.prices.retrieve(priceId).catch(() => null)
-      : null;
+    const currentPrice = priceId ? await stripe.prices.retrieve(priceId).catch(() => null) : null;
     const priceMatches =
-      currentPrice?.unit_amount === c.priceCents && currentPrice?.active === true;
+      currentPrice?.unit_amount === c.price_cents && currentPrice?.active === true;
 
     if (!productId) {
       const product = await stripe.products.create(
         {
           name: `${c.title} (${c.school})`,
-          description: c.summary,
-          metadata: { class_offering_id: cls.id, term: "Fall 2026" },
+          description: c.summary?.slice(0, 500) ?? undefined,
+          metadata: { class_offering_id: c.id },
         },
-        { idempotencyKey: `product:${cls.id}` },
+        { idempotencyKey: `product:${c.id}` },
       );
       productId = product.id;
     }
@@ -294,21 +168,20 @@ async function main() {
       const price = await stripe.prices.create(
         {
           product: productId,
-          unit_amount: c.priceCents,
+          unit_amount: c.price_cents,
           currency: "usd",
-          metadata: { class_offering_id: cls.id },
+          metadata: { class_offering_id: c.id },
         },
-        { idempotencyKey: `price:${cls.id}:${c.priceCents}` },
+        { idempotencyKey: `price:${c.id}:${c.price_cents}` },
       );
       priceId = price.id;
     }
 
     await sql`update class_offerings
                  set stripe_product_id = ${productId}, stripe_price_id = ${priceId}
-               where id = ${cls.id}`;
-
-    console.log(`  ${c.title} at ${c.school}: ${c.capacity} seats, ${priceId}`);
+               where id = ${c.id}`;
   }
+  console.log(`  ${sellable.length} offerings priced in Stripe.`);
 
   console.log("Creating logins...");
   const staffAuthId = await ensureAuthUser(STAFF_EMAIL, STAFF_PASSWORD, {
@@ -323,13 +196,26 @@ async function main() {
   const parentAuthId = await ensureAuthUser(DEMO_PARENT_EMAIL, DEMO_PARENT_PASSWORD, {
     full_name: DEMO_PARENT_NAME,
   });
-  await sql`insert into parents (auth_user_id, email, full_name)
-            values (${parentAuthId}, ${DEMO_PARENT_EMAIL}, ${DEMO_PARENT_NAME})
+  await sql`insert into parents (auth_user_id, email, full_name, phone)
+            values (${parentAuthId}, ${DEMO_PARENT_EMAIL}, ${DEMO_PARENT_NAME}, '808-555-0142')
             on conflict (email) do update
               set auth_user_id = excluded.auth_user_id,
                   full_name = excluded.full_name`;
 
-  console.log(`\nDone.`);
+  const [counts] = await sql<
+    { schools: number; programs: number; offerings: number; sellable: number; sessions: number }[]
+  >`select (select count(*) from schools)::int                              as schools,
+           (select count(*) from programs)::int                             as programs,
+           (select count(*) from class_offerings)::int                      as offerings,
+           (select count(*) from class_offerings
+             where registration_mode = 'keiki_coders')::int                 as sellable,
+           (select count(*) from sessions where status = 'scheduled')::int  as sessions`;
+
+  console.log("Done.");
+  console.log(
+    `  ${counts.schools} schools, ${counts.programs} programs, ${counts.offerings} offerings ` +
+      `(${counts.sellable} sold here), ${counts.sessions} sessions.`,
+  );
   console.log(`  Staff:  ${STAFF_EMAIL} / ${STAFF_PASSWORD}`);
   console.log(`  Parent: ${DEMO_PARENT_EMAIL} / ${DEMO_PARENT_PASSWORD}`);
   await sql.end();

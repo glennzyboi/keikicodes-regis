@@ -162,14 +162,17 @@ async function fulfil(session: Stripe.Checkout.Session) {
         weekday: number;
         start_time: string;
         end_time: string;
-        weeks: number;
+        session_count: number;
         amount_cents: number;
         first_session: Date | null;
         children: string[];
       }[]
     >`select p.email, p.full_name as parent_name,
              c.title as class_title, sc.name as school, sc.timezone,
-             c.weekday, c.start_time, c.end_time, c.weeks,
+             c.weekday, c.start_time, c.end_time,
+             (select count(*) from sessions ses2
+               where ses2.class_offering_id = c.id and ses2.status = 'scheduled')::int
+               as session_count,
              o.amount_cents,
              (select min(ses.starts_at) from sessions ses
                where ses.class_offering_id = c.id and ses.status = 'scheduled') as first_session,
@@ -182,7 +185,7 @@ async function fulfil(session: Stripe.Checkout.Session) {
         join schools sc on sc.id = c.school_id
        where o.id = ${orderId}
        group by p.email, p.full_name, c.id, c.title, sc.name, sc.timezone,
-                c.weekday, c.start_time, c.end_time, c.weeks, o.amount_cents`;
+                c.weekday, c.start_time, c.end_time, o.amount_cents`;
 
     if (summary) {
       const days = ["Sundays","Mondays","Tuesdays","Wednesdays","Thursdays","Fridays","Saturdays"];
@@ -197,7 +200,7 @@ async function fulfil(session: Stripe.Checkout.Session) {
           className: summary.class_title,
           school: summary.school,
           children: summary.children,
-          schedule: `${days[summary.weekday]} ${summary.start_time.slice(0, 5)} to ${summary.end_time.slice(0, 5)}, ${summary.weeks} weeks`,
+          schedule: `${days[summary.weekday]} ${summary.start_time.slice(0, 5)} to ${summary.end_time.slice(0, 5)}, ${summary.session_count} sessions`,
           firstSession: summary.first_session
             ? inSchoolTime(new Date(summary.first_session), summary.timezone)
             : "To be confirmed",

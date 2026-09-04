@@ -28,7 +28,7 @@ type Row = {
   weekday: number;
   start_time: string;
   end_time: string;
-  weeks: number;
+  subject: string | null;
   price_cents: number;
   paid_at: Date | null;
 };
@@ -42,12 +42,13 @@ export default async function Portal() {
     select e.id as enrollment_id, e.status,
            ch.id as child_id, ch.first_name || ' ' || ch.last_name as child_name,
            c.id as class_offering_id, c.title, s.name as school, s.timezone,
-           c.weekday, c.start_time, c.end_time, c.weeks,
+           c.weekday, c.start_time, c.end_time, pr.subject,
            oi.unit_price_cents as price_cents, o.fulfilled_at as paid_at
       from enrollments e
       join children ch          on ch.id = e.child_id
       join class_offerings c    on c.id = e.class_offering_id
       join schools s            on s.id = c.school_id
+      join programs pr          on pr.id = c.program_id
       join order_items oi       on oi.id = e.order_item_id
       join orders o             on o.id = oi.order_id
      where ch.parent_id = ${parent.id}
@@ -88,9 +89,9 @@ export default async function Portal() {
       scheduleLabel: `${DAYS[r.weekday]} ${timeLabel(r.start_time)} to ${timeLabel(r.end_time)}`,
       priceCents: r.price_cents,
       paid: Boolean(r.paid_at),
-      weeks: r.weeks,
+      sessionsTotal: mine.filter((s) => s.status === "scheduled").length,
       sessionsLeft: mine.filter((s) => s.status === "scheduled" && s.starts_at >= now).length,
-      accent: artFor(r.title).accent,
+      accent: artFor(r.subject ?? r.title).accent,
       sessions: mine.map((s) => ({
         id: s.id,
         startsAt: new Date(s.starts_at).toISOString(),

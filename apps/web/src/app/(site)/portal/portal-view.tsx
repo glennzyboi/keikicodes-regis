@@ -31,7 +31,7 @@ export type PortalRegistration = {
   priceCents: number;
   paid: boolean;
   sessionsLeft: number;
-  weeks: number;
+  sessionsTotal: number;
   accent: string;
   sessions: {
     id: string;
@@ -159,7 +159,7 @@ export function PortalView({
                   </span>
                   <span className="mt-2 flex flex-wrap items-center gap-1.5">
                     <span className="kc-chip">{money(r.priceCents)}</span>
-                    <span className="kc-chip">{r.sessionsLeft} of {r.weeks} left</span>
+                    <span className="kc-chip">{r.sessionsLeft} of {r.sessionsTotal} left</span>
                     {r.status === "cancellation_requested" ? (
                       <span className="kc-chip kc-chip-accent">Cancellation requested</span>
                     ) : (
@@ -176,7 +176,7 @@ export function PortalView({
                     <Fact label="When">{r.scheduleLabel}</Fact>
                     <Fact label="Paid">{r.paid ? money(r.priceCents) : "Awaiting payment"}</Fact>
                     <Fact label="Sessions">
-                      {r.sessionsLeft} still to run, out of {r.weeks}
+                      {r.sessionsLeft} still to run, out of {r.sessionsTotal}
                     </Fact>
                   </Facts>
 

@@ -1,0 +1,107 @@
+/*
+  The photo control.
+
+  The preview is a fixed circle rather than a box that grows when an image
+  lands, so nothing below it jumps while a parent is still reading the form.
+  That reflow is the single most common way an upload control feels broken.
+*/
+.kc-photo {
+  display: block;
+}
+
+.kc-photo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.kc-photo-preview {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-green-100, #e6f2ed);
+  color: var(--color-green-600, #2e9e74);
+  border: 2px solid transparent;
+  transition:
+    border-color 200ms var(--ease-out, ease),
+    background-color 200ms ease;
+}
+.kc-photo-preview[data-state="done"] {
+  border-color: var(--color-green-500, #2e9e74);
+}
+.kc-photo-preview[data-state="error"] {
+  border-color: var(--color-sun-deep, #e6b800);
+}
+.kc-photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kc-photo-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklab, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: kc-photo-spin 620ms linear infinite;
+}
+
+/*
+  Deliberately fast. A spinner that turns quickly makes the wait feel shorter
+  than the same wait behind a slow one, and this is a wait we are trying to
+  make invisible.
+*/
+@keyframes kc-photo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.kc-photo-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.kc-photo-actions input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/*
+  The input is visually hidden but still focusable, so keyboard users land on
+  it before the button. Giving it a visible ring when focused keeps that from
+  looking like focus vanished.
+*/
+.kc-photo-actions input[type="file"]:focus-visible + button {
+  outline: 2px solid var(--color-green-500, #2e9e74);
+  outline-offset: 2px;
+}
+
+.kc-photo-hint {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft, #4a5551);
+  max-width: 34ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-photo-spinner {
+    animation-duration: 1.6s;
+  }
+  .kc-photo-preview {
+    transition-duration: 1ms;
+  }
+}

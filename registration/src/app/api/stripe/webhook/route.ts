@@ -101,6 +101,24 @@ async function fulfil(session: Stripe.Checkout.Session) {
         from order_items where order_id = ${orderId}`;
 
     for (const item of items) {
+      // Deleting the hold does not decrement the counter: the seat converts
+      // from held to enrolled, it is not returned to the pool.
+      const removed = await tx<{ id: string }[]>`
+        delete from seat_holds where order_item_id = ${item.id} returning id`;
+
+      // No hold means something took it back before we got here. The sweeper
+      // no longer does this, but a manual sweep or an older row still can, and
+      // the parent has already been charged either way. Try to reclaim the
+      // seat. If the class has genuinely filled in the meantime, enrol anyway
+      // and flag it: we are not refusing a place to someone who has paid, and
+      // an over-capacity class is a conversation for staff, not a silent loss.
+      let overCapacity = false;
+      if (removed.length === 0) {
+        const [{ take_seat: reclaimed }] = await tx<{ take_seat: boolean }[]>`
+          select take_seat(${item.class_offering_id})`;
+        overCapacity = !reclaimed;
+      }
+
       const [enrollment] = await tx<{ id: string }[]>`
         insert into enrollments
           (class_offering_id, child_id, order_item_id, status, starts_from_session_id)
@@ -111,12 +129,14 @@ async function fulfil(session: Stripe.Checkout.Session) {
         do nothing
         returning id`;
 
-      await tx`delete from seat_holds where order_item_id = ${item.id}`;
-
       if (enrollment) {
         await tx`insert into enrollment_events (enrollment_id, order_id, event, payload)
-                 values (${enrollment.id}, ${orderId}, 'enrolled',
-                         ${JSON.stringify({ stripe_session: session.id })}::jsonb)`;
+                 values (${enrollment.id}, ${orderId},
+                         ${overCapacity ? "enrolled_over_capacity" : "enrolled"},
+                         ${JSON.stringify({
+                           stripe_session: session.id,
+                           hold_missing: removed.length === 0,
+                         })}::jsonb)`;
       }
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import { RegistrationInput, createPendingOrder } from "@/lib/registration";
+import { HOLD_SECONDS } from "@/lib/holds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,7 +98,8 @@ export async function POST(req: Request) {
         metadata: { order_id: order.id },
         success_url: `${appUrl}/confirming?order=${order.id}`,
         cancel_url: `${appUrl}/?cancelled=${order.id}`,
-        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+        // Same lifetime as the seat hold, so the two can never disagree.
+        expires_at: Math.floor(Date.now() / 1000) + HOLD_SECONDS,
       },
       // A retried API call returns the same session instead of a second charge.
       { idempotencyKey: `checkout:${order.id}` },

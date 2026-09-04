@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sql } from "./db";
+import { HOLD_MINUTES } from "./holds";
 
 /**
  * Phase one of a registration: everything that happens BEFORE the parent is sent
@@ -44,8 +45,6 @@ export type RegistrationResult =
   | { ok: false; reason: "class_full"; fullClasses: { id: string; title: string }[] }
   | { ok: false; reason: "already_enrolled"; detail: string }
   | { ok: false; reason: "class_not_available" };
-
-const HOLD_MINUTES = 15;
 
 export async function createPendingOrder(
   input: RegistrationInput,

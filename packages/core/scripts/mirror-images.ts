@@ -106,6 +106,18 @@ async function mirror(
       continue;
     }
     const bytes = new Uint8Array(await res.arrayBuffer());
+
+    // A placeholder is not a picture. One of their programme records points at
+    // a seventy byte PNG, a 1x1 transparent pixel, which copies perfectly and
+    // then renders as a coloured smear across a whole card. Carrying it over
+    // would be carrying a defect. See MIN_BYTES in catalogue/images.ts.
+    if (bytes.byteLength < 200) {
+      console.log(`  ${row.name}: only ${bytes.byteLength} bytes, dropping it rather than copying`);
+      await target`update ${target(table)} set ${target(column)} = null where name = ${row.name}`;
+      missing++;
+      continue;
+    }
+
     const ext = path.split(".").pop()?.toLowerCase() ?? "";
 
     const { error } = await storage.storage.from(bucket).upload(path, bytes, {

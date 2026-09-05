@@ -22,6 +22,14 @@ import { createClient } from "@supabase/supabase-js";
 const BUCKETS = { school: "school-logos", program: "program-images" } as const;
 
 const MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Below this, it is a placeholder rather than a photograph. A 1x1 transparent
+ * PNG is seventy bytes; the smallest genuine picture in their catalogue is
+ * forty kilobytes. Two hundred bytes sits in the empty space between those and
+ * needs no image decoding to apply.
+ */
+const MIN_BYTES = 200;
 const TIMEOUT_MS = 12_000;
 
 const ALLOWED: Record<string, string> = {
@@ -101,8 +109,20 @@ export async function copyImage(
     if (!ext) return { url: sourceUrl, copied: false, problem: `not an image (${type})` };
 
     const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength === 0) {
-      return { url: sourceUrl, copied: false, problem: "empty file" };
+    if (bytes.byteLength < MIN_BYTES) {
+      // Not "empty" — a real answer that is not a real picture. One of their
+      // programme records points at a seventy byte PNG, which is a 1x1
+      // transparent pixel, and it copied across perfectly and then rendered as
+      // a coloured smear stretched over a whole card. Worse than a broken
+      // image, because nothing looks broken: it just looks badly designed.
+      //
+      // Treated as no picture, which is true, and the initial-letter fallback
+      // every surface already has takes over.
+      return {
+        url: null,
+        copied: false,
+        problem: `only ${bytes.byteLength} bytes, not a picture`,
+      };
     }
     if (bytes.byteLength > MAX_BYTES) {
       return { url: sourceUrl, copied: false, problem: "larger than 4MB" };

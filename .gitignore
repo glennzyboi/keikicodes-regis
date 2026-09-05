@@ -19,3 +19,6 @@ blob-report/
 supabase/.temp/
 supabase/.branches/
 tools/
+
+# Scratch scripts written against a live database. Never committed.
+packages/core/*.mjs

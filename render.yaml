@@ -1,40 +1,49 @@
-# Two services and three cron jobs.
+# One service and three cron jobs.
 #
-# The split is not decoration. The API service is the only thing holding a
-# Stripe secret, the only thing verifying webhook signatures, and the only
-# thing running the background jobs. The web service renders pages. If the
-# frontend is compromised tomorrow, nobody can charge a card with it.
+# The split is not decoration. The API service is the only thing on Render
+# holding a Stripe secret, and it is the only thing running the background
+# jobs. The site itself is on Vercel, because it is a Next.js app and every
+# page of it is server rendered close to the person reading it.
 #
-# Both read the same database, and both build from the same repo, because the
-# domain lives in packages/core and is shared rather than duplicated.
+# Both halves read the same database, and both build from the same repo,
+# because the domain lives in packages/core and is shared rather than
+# duplicated. That is why rootDir is the repo root and not apps/api: pnpm has
+# to see the workspace to link the package.
 #
-# Deploy with: render blueprint launch, or point Render at this file.
+# Deploy by pointing Render at this file (Blueprints → New Blueprint Instance).
 # Every secret below is marked sync: false, so Render asks rather than storing
 # anything in git. Nothing here is a value; they are all names.
+#
+# On the free plan a web service sleeps after fifteen minutes of no traffic and
+# takes about a minute to answer the request that wakes it. That is fine for
+# the catalogue endpoints, which a Squarespace page reads on a schedule, and it
+# is the reason nothing time critical was put behind them.
 
 services:
   # ---------------------------------------------------------------- the API
   - type: web
     name: keiki-api
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     rootDir: .
     buildCommand: corepack enable && pnpm install --frozen-lockfile
     startCommand: pnpm --filter api start
     healthCheckPath: /health
-    autoDeploy: false
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: "24"
-      - key: PORT
-        value: "3001"
       # The catalogue endpoints put this into every registerUrl they return, so
       # it has to be the address families actually see.
       - key: PUBLIC_SITE_URL
-        value: https://www.keikicoders.com
+        value: https://keikicoders-registration.vercel.app
       - key: DATABASE_URL
         sync: false
+      # Small on purpose. Several processes share one Supabase pooler, and the
+      # ceiling is reached by having many pools rather than one big one.
+      - key: DATABASE_POOL_MAX
+        value: "3"
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -46,41 +55,14 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_TRANSPORT
-        value: resend
+      # The database is seeded with believable families, so delivery is refused
+      # outright. Clear this when it holds real people. See core/src/email.ts.
+      - key: DEMO_DATA
+        value: "1"
       - key: EMAIL_FROM
-        value: Keiki Coders <hello@keikicoders.com>
-
-  # ---------------------------------------------------------------- the site
-  - type: web
-    name: keiki-web
-    runtime: node
-    plan: starter
-    region: oregon
-    rootDir: .
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter web build
-    startCommand: pnpm --filter web start
-    autoDeploy: false
-    envVars:
-      - key: NODE_VERSION
-        value: "24"
-      - key: DATABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: NEXT_PUBLIC_GOOGLE_AUTH
-        value: "false"
-      - key: API_URL
-        fromService:
-          type: web
-          name: keiki-api
-          property: hostport
+        value: hello@keikicoders.com
+      - key: EMAIL_FROM_NAME
+        value: Keiki Coders
 
 # ---------------------------------------------------------------------------
 # The jobs.
@@ -107,6 +89,10 @@ services:
         value: "24"
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_POOL_MAX
+        value: "2"
+      - key: DEMO_DATA
+        value: "1"
 
   - type: cron
     name: keiki-notify
@@ -125,27 +111,22 @@ services:
         value: "24"
       - key: DATABASE_URL
         sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_TRANSPORT
-        value: resend
+      - key: DATABASE_POOL_MAX
+        value: "2"
+      - key: DEMO_DATA
+        value: "1"
       - key: EMAIL_FROM
-        value: Keiki Coders <hello@keikicoders.com>
+        value: hello@keikicoders.com
+      - key: EMAIL_FROM_NAME
+        value: Keiki Coders
 
-  - type: cron
-    name: keiki-sweep-holds
-    runtime: node
-    plan: starter
-    region: oregon
-    rootDir: .
-    # Every minute. A seat held by somebody who opened Stripe and wandered off
-    # is a seat another family could have had, and holds are only thirty
-    # minutes long, so a slow sweep is a real cost.
-    schedule: "* * * * *"
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
-    startCommand: pnpm --filter api job:sweep
-    envVars:
-      - key: NODE_VERSION
-        value: "24"
-      - key: DATABASE_URL
-        sync: false
+  # There is deliberately no keiki-sweep-holds here any more.
+  #
+  # The seat sweeper is one statement, select release_expired_holds(), and every
+  # safety property it has lives inside that function. It now runs as a pg_cron
+  # job in the database itself, once a minute, which is both cheaper and more
+  # reliable than a container that can be asleep at exactly the moment holds are
+  # ageing. See supabase/migrations/20260906090000_sweep_on_a_schedule.sql.
+  #
+  # `pnpm sweep` still works by hand, and the code is unchanged, so nothing was
+  # lost by moving where it is called from.

@@ -287,8 +287,16 @@ export async function seedScenarios(sql: Sql): Promise<Scenarios> {
   // "50 parents hit a class with 12 seats." A class one seat from full, so the
   // oversell story has something real to point at.
   // -------------------------------------------------------------------------
-  const [tight] = await sql<{ id: string; title: string; capacity: number; seats_taken: number }[]>`
-    select c.id, c.title, c.capacity, c.seats_taken
+  const [tight] = await sql<
+    {
+      id: string;
+      title: string;
+      capacity: number;
+      seats_taken: number;
+      price_cents: number | null;
+    }[]
+  >`
+    select c.id, c.title, c.capacity, c.seats_taken, c.price_cents
       from class_offerings c
      where c.status = 'published' and c.registration_mode = 'keiki_coders'
        and c.capacity between 12 and 20
@@ -299,35 +307,43 @@ export async function seedScenarios(sql: Sql): Promise<Scenarios> {
     const free = tight.capacity - tight.seats_taken;
     if (free > 1) {
       /*
-       * Filled with real seat holds rather than fabricated enrollments.
+       * Filled with paid enrollments, not seat holds.
        *
-       * A hold is what a parent halfway through checkout actually creates, so
-       * this leaves the class in a state the product genuinely produces, and it
-       * keeps `enrolled + held = seats_taken` true, which is the invariant the
-       * console checks itself against and shows as drift when it fails.
+       * The first version used holds, on the argument that a hold is what a
+       * parent halfway through checkout actually creates. That argument was
+       * wrong twice over.
        *
-       * One order per hold. `order_items` is unique on
-       * (order, class, child), which is a good constraint doing its job: the
-       * same child cannot be billed twice for the same class on one order. The
-       * first version of this reused a single order and was correctly refused.
+       * It was wrong about the product: the sweeper releases an expired hold
+       * once a minute, and since that sweeper moved into the database it runs
+       * on the deployment too, so twelve minutes after seeding it correctly ate
+       * the entire demonstration and the class went back to five of sixteen.
+       * The state could not survive its own system, which is a good sign the
+       * state was a lie.
+       *
+       * And it was wrong about the story. A class one seat from full is fifteen
+       * families who paid, over weeks. It is not fifteen people simultaneously
+       * stuck on a card form. Enrollments are what that class really looks
+       * like, they keep `enrolled + held = seats_taken` true just as well, and
+       * nothing reclaims them.
        */
-      const held = await sql<{ id: string; first_name: string }[]>`
-        select id, first_name from children order by created_at asc limit ${free - 1}`;
+      const fillers = await sql<{ id: string; parent_id: string }[]>`
+        select ch.id, ch.parent_id
+          from children ch
+         where not exists (
+           select 1 from enrollments e
+            where e.child_id = ch.id and e.class_offering_id = ${tight.id})
+         order by ch.created_at asc
+         limit ${free - 1}`;
 
-      for (let i = 0; i < Math.min(free - 1, held.length); i++) {
-        const [order] = await sql<{ id: string }[]>`
-          insert into orders (parent_id, amount_cents, currency, status, idempotency_key)
-          select ch.parent_id, ${tight.capacity ? 0 : 0}, 'usd', 'pending', ${`seed:tight:${i}`}
-            from children ch where ch.id = ${held[i].id}
-          returning id`;
-        const [item] = await sql<{ id: string }[]>`
-          insert into order_items (order_id, class_offering_id, child_id, unit_price_cents)
-          values (${order.id}, ${tight.id}, ${held[i].id}, 0)
-          returning id`;
-        await sql`
-          insert into seat_holds (order_item_id, class_offering_id, expires_at)
-          values (${item.id}, ${tight.id}, now() + interval '12 minutes')`;
-        await takeSeat(sql, tight.id);
+      for (let i = 0; i < fillers.length; i++) {
+        await enroll(sql, {
+          parentId: fillers[i].parent_id,
+          childId: fillers[i].id,
+          classId: tight.id,
+          priceCents: tight.price_cents ?? 0,
+          key: `tight:${i}`,
+          daysAgo: 30 - i,
+        });
       }
     }
     out["A class one seat from full"] =

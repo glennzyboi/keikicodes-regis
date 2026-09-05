@@ -17,7 +17,8 @@
     "sweep": "pnpm --filter api job:sweep",
     "test": "pnpm --filter web test",
     "verify:api": "pnpm --filter @keiki/core verify:api",
-    "seed:snapshot": "pnpm --filter @keiki/core seed -- --snapshot"
+    "seed:snapshot": "pnpm --filter @keiki/core seed -- --snapshot",
+    "check:schedule": "pnpm --filter @keiki/core check:schedule"
   },
   "devDependencies": {
     "typescript": "^5"

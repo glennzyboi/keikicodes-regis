@@ -20,7 +20,10 @@ export default function globalSetup() {
   const require = createRequire(__filename);
   const tsx = path.join(path.dirname(require.resolve("tsx/package.json")), "dist", "cli.mjs");
 
-  execFileSync(process.execPath, [tsx, "--env-file=.env.local", "../../packages/core/scripts/seed.ts", "--snapshot"], {
+  execFileSync(process.execPath,     // --no-families: the suite needs a known, empty starting point. Forty demo
+    // families holding seats would move every "seats free" assertion in it. The
+    // demo data is for looking at the console, not for testing against.
+    [tsx, "--env-file=.env.local", "../../packages/core/scripts/seed.ts", "--snapshot", "--no-families"], {
     cwd: root,
     stdio: "inherit",
   });

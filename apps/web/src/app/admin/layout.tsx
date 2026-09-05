@@ -1,62 +1,32 @@
 import type { Metadata } from "next";
 import "./ops.css";
-import { currentStaff } from "@/lib/staff-auth";
-import { asUser } from "@keiki/core/rls";
-import { navCounts } from "./queries";
-import { Rail } from "./rail";
-import { signOut } from "./actions";
-import { CommandPalette } from "./command-palette";
 
 export const metadata: Metadata = {
   title: "Keiki Coders Ops",
   description: "Registration operations console.",
 };
 
-export const dynamic = "force-dynamic";
-
 /**
- * The office console.
+ * The outer frame of everything at /admin, and deliberately almost nothing.
  *
- * No brand chrome, on purpose. This is an internal tool read for hours by
- * people who already know what everything means, and the friendly rounded
- * display type that sells a class to a parent gets tiring at that duty cycle.
- * ops.css is imported here and nowhere else, so the split is enforced by the
- * module graph rather than by everyone remembering.
+ * This used to hold the rail, and holding the rail here was a bug with a
+ * surprising cause. `/admin/login` sits under this layout, so it is a **sibling**
+ * of every console page beneath a shared layout, and Next does not re-render a
+ * shared layout on a client side navigation between siblings. Signing out is a
+ * client navigation. So the page swapped to the login form and the rail, already
+ * mounted, simply stayed there: signed out, still looking at the console's
+ * furniture. A hard reload looked correct, which is exactly why it read as
+ * "weird" rather than as broken.
+ *
+ * The console now lives in a (console) route group with its own layout, so
+ * moving between the login page and the console crosses a layout boundary and
+ * the shell genuinely unmounts.
+ *
+ * ops.css is imported here and nowhere else, so the split between the parent
+ * site's typography and this one is enforced by the module graph rather than by
+ * everyone remembering. The login page needs it too, which is the other reason
+ * it stays at this level rather than moving into the group.
  */
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const staff = await currentStaff();
-
-  // Signed out, or signing in. The login page draws its own frame.
-  if (!staff) return <div className="ops">{children}</div>;
-
-  const counts = await asUser(staff.authUserId, (tx) => navCounts(tx));
-
-  return (
-    <div className="ops">
-      <div className="ops-shell">
-        <Rail counts={counts} staff={staff} />
-
-        <div className="min-w-0">
-          <header className="ops-topbar">
-            <CommandPalette />
-
-            <div className="flex items-center gap-2">
-              <span className="ops-pill ops-pill-quiet">
-                <span className="ops-dot" style={{ background: "var(--ops-good)" }} />
-                Stripe test mode
-              </span>
-              <a className="ops-btn" href="/" target="_blank" rel="noreferrer">
-                Parent site
-              </a>
-              <form action={signOut}>
-                <button className="ops-btn">Sign out</button>
-              </form>
-            </div>
-          </header>
-
-          <main className="px-5 py-6 lg:px-7">{children}</main>
-        </div>
-      </div>
-    </div>
-  );
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return <div className="ops">{children}</div>;
 }

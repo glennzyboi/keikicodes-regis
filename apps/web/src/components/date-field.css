@@ -1,63 +1,127 @@
 /* =====================================================================
    Date field
 
-   Three selects that stack on a narrow screen and sit in a row once there
-   is width. Month is widest because "September" is long; day is narrowest.
+   Three boxes you type into, day then month then year. They are sized to
+   their content rather than stretched across the row: a two digit field as
+   wide as the page invites somebody to type a year into it.
    ===================================================================== */
+/*
+  Proportional rather than fixed. These sit inside a three column grid on the
+  registration form, and fixed widths made the three boxes wrap onto three
+  separate rows in a column about 195px wide, which read as three unrelated
+  fields. Flex basis zero with a growth ratio keeps them on one line at any
+  width the card can be, and the year gets the extra because it holds twice the
+  digits.
+*/
 .df-parts {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  align-items: flex-end;
   gap: 8px;
 }
-@media (min-width: 420px) {
-  .df-parts {
-    /* Month, day, year. Proportional to the longest content in each. */
-    grid-template-columns: 1.5fr 1fr 1.1fr;
-  }
+.df-parts:focus {
+  outline: none;
+}
+
+.df-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+.df-box:last-child {
+  flex-grow: 1.35;
+}
+.df-box-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft, #667085);
 }
 
 /*
-  Native selects on iOS ignore height and inherit a 16px minimum before they
-  stop zooming the page on focus. Anything smaller triggers the zoom, which
-  is the single most annoying thing a mobile form can do.
+  16px minimum, or iOS zooms the page on focus, which is the single most
+  annoying thing a mobile form can do. Tabular figures so the digits do not
+  shuffle sideways as they are typed.
 */
-.df-parts select {
-  font-size: 16px;
-  min-height: 44px;
+.df-parts input {
   width: 100%;
-}
-@media (min-width: 640px) {
-  .df-parts select {
-    font-size: 1rem;
-    min-height: 0;
-  }
+  min-width: 0;
+  font-size: 16px;
+  min-height: 46px;
+  padding-inline: 0.4rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
 }
 
-.df-native {
+/* The line under the boxes: what was entered, written out, and the calendar. */
+.df-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-top: 8px;
 }
-.df-native > summary {
-  display: inline-block;
-  font-size: 0.82rem;
-  color: var(--color-ink-soft, #667085);
-  cursor: pointer;
-  list-style: none;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 3px;
+.df-readable {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-green-700, #1b7a5a);
 }
-.df-native > summary::-webkit-details-marker {
-  display: none;
+.df-readable-off {
+  color: #9a4b00;
+}
+
+/*
+  The native picker, as a real button rather than the footnote it used to be.
+  The input itself is visually hidden but still focusable and still clickable,
+  so the whole label is the target and the OS picker opens from it.
+*/
+.df-native {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-hairline, #ebedee);
+  background: var(--color-paper, #fff);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-green-900, #0f5740);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.df-native:hover {
+  background: var(--color-green-100, #eef3f0);
+}
+.df-native:focus-within {
+  outline: 3px solid var(--color-green-500, #2e9e74);
+  outline-offset: 2px;
+}
+.df-native::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: var(--df-cal) center / contain no-repeat;
+  mask: var(--df-cal) center / contain no-repeat;
 }
 .df-native input[type="date"] {
-  font-size: 16px;
-  min-height: 44px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
 }
-@media (min-width: 640px) {
-  .df-native input[type="date"] {
-    font-size: 1rem;
-    min-height: 0;
-  }
+
+:root {
+  --df-cal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Crect x='3.5' y='5' width='17' height='16' rx='2.5'/%3E%3Cpath d='M3.5 10h17M8 3v4M16 3v4'/%3E%3C/svg%3E");
 }
 
 .df-hint {

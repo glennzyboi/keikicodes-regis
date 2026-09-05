@@ -28,8 +28,35 @@ export interface EmailTransport {
   send(message: Outbound): Promise<SendResult>;
 }
 
-const FROM_EMAIL = process.env.EMAIL_FROM ?? "hello@keikicoders.test";
+const FROM_EMAIL = process.env.EMAIL_FROM ?? "hello@keikicoders.com";
 const FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Keiki Coders";
+
+/**
+ * The demo stop.
+ *
+ * The prototype is seeded with thirty six believable families, and believable
+ * means addresses like malia.kealoha@gmail.com — addresses that may well belong
+ * to somebody. Nothing can deliver to them today because the deployment has no
+ * Resend key, but "nothing can deliver today" is not a control, it is a
+ * coincidence waiting to be undone by whoever adds the key.
+ *
+ * So DEMO_DATA=1 refuses delivery outright, and it does it by returning a
+ * failure rather than throwing: the worker records the reason against the
+ * message, the Outbox in the console shows exactly why it did not go, and one
+ * badly addressed batch cannot take the cron down. Clear the flag when the
+ * database holds real people.
+ */
+class DemoBlockedTransport implements EmailTransport {
+  readonly name = "demo-blocked";
+  async send(message: Outbound): Promise<SendResult> {
+    return {
+      ok: false,
+      error:
+        `refused: DEMO_DATA=1, so ${message.to} was not written to. ` +
+        "This database holds seeded families with realistic addresses.",
+    };
+  }
+}
 
 /** Production. https://resend.com/docs/api-reference/emails/send-email */
 class ResendTransport implements EmailTransport {
@@ -113,6 +140,9 @@ class MailpitTransport implements EmailTransport {
 export function emailTransport(): EmailTransport {
   const choice = process.env.EMAIL_TRANSPORT;
   const key = process.env.RESEND_API_KEY;
+
+  // Checked before anything else, so it cannot be reasoned around.
+  if (process.env.DEMO_DATA === "1") return new DemoBlockedTransport();
 
   if (choice === "resend" || (!choice && key)) {
     if (!key) throw new Error("EMAIL_TRANSPORT=resend but RESEND_API_KEY is not set");

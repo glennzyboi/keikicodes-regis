@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { resolveParent, type Parent } from "@keiki/core/identity";
@@ -44,8 +45,16 @@ export async function supabaseParent() {
   );
 }
 
-/** The signed in parent, creating the parents row on first sight. */
-export async function currentParent(): Promise<Parent | null> {
+/**
+ * The signed in parent, creating the parents row on first sight.
+ *
+ * Deduplicated per request for the same reason as the staff side: `getUser()`
+ * is a network call to the auth server, the dashboard asks this from a layout
+ * and again from the page inside it, and every one of those is a round trip
+ * that can time out under load and come back indistinguishable from "signed
+ * out". Per request, so nothing is cached across people.
+ */
+export const currentParent = cache(async (): Promise<Parent | null> => {
   const supabase = await supabaseParent();
   const {
     data: { user },
@@ -57,7 +66,7 @@ export async function currentParent(): Promise<Parent | null> {
     name:
       (user.user_metadata?.full_name as string) ?? (user.user_metadata?.name as string) ?? null,
   });
-}
+});
 
 /** Is Google sign in configured on this deployment? */
 export const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH === "true";

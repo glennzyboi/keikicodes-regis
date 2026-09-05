@@ -16,7 +16,8 @@
   two things to keep in step; naming both selectors is one.
 */
 .ops,
-.ops-palette-backdrop {
+.ops-palette-backdrop,
+.mdl-ops {
   --ops-bg: #f7f8fa;
   --ops-surface: #ffffff;
   --ops-line: #e4e7ec;
@@ -296,6 +297,13 @@
 }
 
 .ops-label {
+  /* Block, because every use of this is a caption sitting above the control it
+     names. It was inline, which put "WHY" on the same line as its own select
+     the first time a <label class="ops-label"> was used instead of the
+     <label><span class="ops-label"> the catalogue forms happen to use. One rule
+     is better than remembering which wrapper each form chose. */
+  display: block;
+  margin-bottom: 4px;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -639,4 +647,963 @@ button.ops-search:active {
   button.ops-search:active {
     transform: none;
   }
+}
+
+/* =====================================================================
+   SCHEDULE EDITOR
+
+   The unit of work here is a selection, so the row under the cursor and the
+   row that is chosen have to be told apart at a glance without either one
+   shouting. Colour only, no movement: this is a table staff scan every
+   morning, and a row that lifts or slides when the pointer crosses it is
+   noise a hundred times a day.
+   ===================================================================== */
+.ops-tint {
+  background: #fbfcfd;
+}
+
+.ops-table tbody tr[data-chosen] {
+  background: var(--ops-accent-soft);
+}
+@media (hover: hover) {
+  .ops-table tbody tr[data-chosen]:hover {
+    background: var(--ops-accent-soft);
+  }
+}
+
+.ops-table input[type="checkbox"],
+.ops-panel input[type="checkbox"] {
+  accent-color: var(--ops-accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.ops-table input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* The answer a form gives back. Announced to a screen reader through
+   aria-live, so it also has to be visible without a colour cue alone. */
+.ops-note {
+  border-radius: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--ops-line);
+  background: var(--ops-surface);
+}
+.ops-note-good {
+  border-color: var(--ops-good);
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+.ops-note-bad {
+  border-color: var(--ops-danger);
+  background: var(--ops-danger-soft);
+  color: var(--ops-danger);
+}
+
+/* =====================================================================
+   SKELETONS
+
+   Shown while a route streams in. Deliberately not a spinner: a spinner says
+   "something is happening", a skeleton says "a table with about this many
+   rows is arriving", and the second one stops the page jumping when it does.
+
+   The shimmer is a background-position animation, which stays off the main
+   thread, and it stops entirely for anyone who asked for less motion.
+   ===================================================================== */
+.ops-skel {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--ops-line-soft) 25%,
+    #e7eaef 37%,
+    var(--ops-line-soft) 63%
+  );
+  background-size: 400% 100%;
+  animation: ops-shimmer 1.4s ease infinite;
+}
+@keyframes ops-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ops-skel {
+    animation: none;
+  }
+}
+
+/* =====================================================================
+   PAGER
+   ===================================================================== */
+.ops-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--ops-line);
+  color: var(--ops-muted);
+}
+.ops-pager-pages {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The shared dialog, in console clothes. Named on .mdl-backdrop as well,
+   because the dialog is portalled onto the body to escape the topbar's
+   backdrop-filter and is therefore outside .ops entirely. */
+.ops,
+.mdl-ops {
+  --mdl-surface: var(--ops-surface, #fff);
+  --mdl-text: var(--ops-text, #101828);
+  --mdl-muted: var(--ops-muted, #667085);
+  --mdl-line: var(--ops-line, #e4e7ec);
+  --mdl-hover: var(--ops-line-soft, #eff1f4);
+  --mdl-accent: var(--ops-accent, #2563eb);
+  --mdl-ease: var(--ops-ease);
+  --mdl-font: 500 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* A note column that stays a column. Long text truncates with the full value
+   on the title attribute, so one chatty note cannot stretch every row. */
+.ops-clamp {
+  display: block;
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A field that grows. .ops-field fixes a 32px height for inputs and selects,
+   which turns a textarea into a one-line slit. */
+.ops-field-area {
+  height: auto;
+  min-height: 58px;
+  padding: 7px 10px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+/* =====================================================================
+   SORTABLE HEADERS AND CLICKABLE ROWS
+   ===================================================================== */
+.ops-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+.ops-sort:hover {
+  color: var(--ops-text);
+}
+.ops-sort:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 2px;
+}
+.ops-sort[data-active] {
+  color: var(--ops-accent);
+}
+/* The unsorted marker is nearly invisible until you look for it: a column of
+   loud arrows on every header is noise on a page staff read all day. */
+.ops-sort-mark {
+  opacity: 0.35;
+  font-size: 10px;
+}
+.ops-sort[data-active] .ops-sort-mark {
+  opacity: 1;
+}
+
+/*
+  A whole row that is one link.
+
+  The anchor is stretched over the row rather than wrapping the cells, so a
+  screen reader gets one link with one name instead of seven fragments. The row
+  needs a positioning context for that, and `position: relative` on a <tr> is
+  not reliable across browsers, so the first cell carries it and the anchor is
+  stretched from there across the row's full width.
+*/
+.ops-table tbody tr:has(.ops-row-link) {
+  cursor: pointer;
+}
+.ops-table tbody tr:has(.ops-row-link) td:first-child {
+  position: relative;
+}
+.ops-row-link {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  max-width: 100%;
+  z-index: 0;
+}
+.ops-table tbody tr:has(.ops-row-link:focus-visible) {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .ops-table tbody tr:has(.ops-row-link):hover {
+    background: var(--ops-accent-soft);
+  }
+}
+/* Anything that has to stay clickable on top of the row link. */
+.ops-cell-top {
+  position: relative;
+  z-index: 1;
+}
+
+/* =====================================================================
+   SIGN IN
+
+   The one screen in the console that carries the brand, and the reasoning is
+   in login/page.tsx: it is the only screen somebody sees before they are
+   signed in, so it is the only one where "is this really theirs" is the
+   question being asked. A plain grey box with two fields looks exactly as much
+   like a phishing page as it does like an internal tool.
+
+   Two columns that become one on a phone, with the brand panel keeping a short
+   band at the top rather than disappearing: on a 360px screen a full height
+   teal panel would push the form below the fold, and the form is the point.
+   ===================================================================== */
+.ops-login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+@media (min-width: 900px) {
+  .ops-login {
+    grid-template-rows: none;
+    grid-template-columns: 1.05fr 1fr;
+  }
+}
+
+.ops-login-brand {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+  padding: 28px 32px;
+  color: #eaf6f1;
+  background:
+    radial-gradient(120% 90% at 18% 8%, rgb(57 150 129 / 0.55), transparent 62%),
+    radial-gradient(90% 80% at 92% 96%, rgb(118 176 106 / 0.32), transparent 60%),
+    linear-gradient(158deg, #10403f 0%, #14384a 58%, #173f4c 100%);
+}
+@media (min-width: 900px) {
+  .ops-login-brand {
+    padding: 56px 60px;
+    gap: 26px;
+  }
+}
+
+/* A hairline of their green along the seam, so the two halves read as one
+   object rather than as a screenshot pasted next to a form. */
+.ops-login-brand::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: linear-gradient(90deg, #399681, #76b06a);
+}
+@media (min-width: 900px) {
+  .ops-login-brand::after {
+    inset: 0 0 0 auto;
+    width: 3px;
+    height: auto;
+    background: linear-gradient(180deg, #399681, #76b06a);
+  }
+}
+
+/* Their logo file. It ships on a near-white ground, so it sits on a soft light
+   plate rather than being punched onto the dark teal, which would show the
+   square. */
+.ops-login-mark {
+  width: 148px;
+  height: auto;
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.94);
+  padding: 6px;
+  box-shadow: 0 14px 30px rgb(0 0 0 / 0.28);
+}
+@media (min-width: 900px) {
+  .ops-login-mark {
+    width: 280px;
+    border-radius: 26px;
+    padding: 8px;
+  }
+}
+
+.ops-login-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgb(234 246 241 / 0.72);
+}
+.ops-login-note {
+  max-width: 36ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgb(234 246 241 / 0.66);
+}
+/* On a phone the panel is a band, so the prose would only push the form down. */
+@media (max-width: 899px) {
+  .ops-login-brand {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+  .ops-login-note {
+    display: none;
+  }
+}
+
+.ops-login-panel {
+  display: grid;
+  place-items: center;
+  padding: 32px 24px 48px;
+  background: var(--ops-surface);
+}
+.ops-login-form {
+  width: 100%;
+  max-width: 23rem;
+}
+
+/* A field with something sitting inside its right edge. */
+.ops-field-wrap {
+  position: relative;
+}
+.ops-reveal {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ops-muted);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.ops-reveal:hover {
+  background: var(--ops-line-soft);
+  color: var(--ops-text);
+}
+.ops-reveal:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 1px;
+}
+
+/* Sign in is the only button on its screen, so it gets the room to say so. */
+.ops-login-form .ops-btn-primary {
+  height: 38px;
+  font-size: 13.5px;
+}
+/* The fields too: 32px is right in a dense table row and mean on a login. */
+.ops-login-form .ops-field {
+  height: 38px;
+}
+
+/* =====================================================================
+   FILTER BAR
+
+   Applies on touch, no Apply button. The reasoning is in filters.tsx; what
+   matters here is that a set filter has to be visibly different from an unset
+   one at a glance, otherwise a person stares at four rows wondering where the
+   rest went. Set selects take the accent; active filters also appear as chips
+   underneath, which is the part that answers "why am I only seeing four" from
+   across the desk.
+   ===================================================================== */
+.ops-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ops-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ops-filters-end {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.ops-fsearch {
+  position: relative;
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+.ops-fsearch-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ops-faint);
+  pointer-events: none;
+}
+.ops-fsearch-input {
+  width: 100%;
+  padding-left: 29px;
+}
+/* Safari draws its own clear affordance on a search input and it collides with
+   the chips, which are the real way to take a filter off here. */
+.ops-fsearch-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.ops-filter-select {
+  padding-right: 26px;
+  max-width: 200px;
+  /* No native arrow on the left of a short label; one caret, drawn once. */
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ops-faint) 50%),
+    linear-gradient(135deg, var(--ops-faint) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.ops-filter-select[data-set] {
+  border-color: var(--ops-accent);
+  background-color: var(--ops-accent-soft);
+  color: var(--ops-accent);
+  font-weight: 500;
+}
+
+/* A small either/or. Two dropdowns' worth of meaning in one control you can
+   read without opening it. */
+.ops-seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--ops-line);
+  border-radius: 9px;
+  background: var(--ops-bg);
+}
+.ops-seg-btn {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ops-muted);
+  transition: background-color 130ms ease, color 130ms ease, transform 130ms var(--ops-ease);
+}
+.ops-seg-btn:active {
+  transform: scale(0.97);
+}
+.ops-seg-btn[data-chosen] {
+  background: var(--ops-surface);
+  color: var(--ops-text);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.08);
+}
+.ops-seg-btn:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 1px;
+}
+
+.ops-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ops-accent);
+  background: var(--ops-accent-soft);
+  color: var(--ops-accent);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: transform 130ms var(--ops-ease), background-color 130ms ease;
+}
+.ops-chip:active {
+  transform: scale(0.96);
+}
+.ops-chip:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 1px;
+}
+.ops-chip-x {
+  display: inline-flex;
+  opacity: 0.6;
+}
+.ops-chip:hover .ops-chip-x {
+  opacity: 1;
+}
+.ops-chip-clear {
+  border-color: var(--ops-line);
+  background: var(--ops-surface);
+  color: var(--ops-muted);
+}
+
+/*
+  While a filter is in flight.
+
+  Deliberately only the controls, not the rows: the rows are replaced by a
+  skeleton by the Suspense boundary keyed on the filter state, and dimming them
+  as well would be two different loading languages for one event. Nothing is
+  disabled, so a second thought about the campus never has to wait for the
+  first one to come back.
+*/
+.ops-filters[data-pending] .ops-filter-select,
+.ops-filters[data-pending] .ops-fsearch-input {
+  opacity: 0.65;
+}
+
+/* =====================================================================
+   CLASS CARDS
+
+   The answer to "it is just tables and tables". A class is a thing with a
+   picture, a campus and a fill level, and somebody scanning for "which
+   Wai'alae class still has room" reads that in one pass off a card and in four
+   off a table row. The table is still there for the comparative questions,
+   which is what a table is genuinely better at.
+
+   Fixed art height and a min-height on the body so every card in a row is the
+   same size whatever the title does. Ragged card heights are what makes a grid
+   read as broken rather than as a grid.
+   ===================================================================== */
+.ops-cards {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+
+.ops-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ops-line);
+  border-radius: 12px;
+  background: var(--ops-surface);
+  overflow: hidden;
+  transition: border-color 140ms ease, box-shadow 140ms var(--ops-ease),
+    transform 140ms var(--ops-ease);
+}
+@media (hover: hover) {
+  .ops-card:hover {
+    border-color: var(--ops-accent);
+    box-shadow: 0 6px 18px rgb(16 24 40 / 0.08);
+  }
+}
+.ops-card:active {
+  transform: scale(0.995);
+}
+/* The whole card is one link with one accessible name, rather than a link per
+   field, which would give a screen reader six links per card all saying
+   different halves of the same thing. */
+.ops-card-link {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 12px;
+}
+.ops-card:has(.ops-card-link:focus-visible) {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: 2px;
+}
+
+.ops-card-art {
+  position: relative;
+  height: 108px;
+  background: var(--ops-line-soft);
+  overflow: hidden;
+}
+.ops-card-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* No picture is a normal state: plenty of their own records have none. An
+   initial on a tint is deliberate, so a missing image never reads as a broken
+   one. */
+.ops-card-art[data-empty] {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, var(--ops-accent-soft), var(--ops-good-soft));
+  color: var(--ops-accent);
+  font-size: 30px;
+  font-weight: 700;
+}
+.ops-card-campus {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(16 24 40 / 0.22);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ops-muted);
+  overflow: hidden;
+}
+.ops-card-campus img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ops-card-status {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.ops-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 13px 13px;
+  min-height: 132px;
+}
+.ops-card-title {
+  font-weight: 600;
+  line-height: 1.3;
+  /* Two lines, then ellipsis: a four line title would push the fill meter of
+     one card out of line with every other card in the row. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Two lines, wrapped, rather than one line ellipsed. The campus and the day and
+   time are the two things somebody scans a card FOR, and "Wed 4:15pm–5:…"
+   truncates away exactly the half that answers "does that clash with pickup". */
+.ops-card-meta {
+  margin-top: 2px;
+  color: var(--ops-muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ops-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.ops-card-fill {
+  margin-top: 6px;
+  color: var(--ops-muted);
+  font-size: 11.5px;
+}
+.ops-card-external {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  color: var(--ops-muted);
+  font-size: 11.5px;
+}
+/* Push the meter to the bottom so meters line up across a row even when one
+   card has a two line title and its neighbour has one. */
+.ops-card-body > div:last-child {
+  margin-top: auto;
+}
+
+/* =====================================================================
+   ONE CLASS: HEADER AND TABS
+   ===================================================================== */
+.ops-classhead {
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.ops-classhead-art {
+  flex: 0 0 190px;
+  align-self: stretch;
+  min-height: 150px;
+  background: var(--ops-line-soft);
+  overflow: hidden;
+}
+.ops-classhead-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ops-classhead-art[data-empty] {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, var(--ops-accent-soft), var(--ops-good-soft));
+  color: var(--ops-accent);
+  font-size: 40px;
+  font-weight: 700;
+}
+/* On a narrow screen the picture is the first thing to go: it is the least
+   informative part of a header whose job is to say WHICH class this is. */
+@media (max-width: 720px) {
+  .ops-classhead-art {
+    display: none;
+  }
+}
+.ops-classhead-body {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+}
+.ops-classhead-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.ops-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--ops-line);
+}
+.ops-tab {
+  position: relative;
+  padding: 8px 12px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ops-muted);
+  transition: color 130ms ease;
+}
+.ops-tab:hover {
+  color: var(--ops-text);
+}
+.ops-tab:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.ops-tab[data-chosen] {
+  color: var(--ops-text);
+  font-weight: 600;
+}
+/* The underline sits on the container's border so the two never disagree by a
+   pixel, which is the sort of thing that reads as blurry rather than as wrong. */
+.ops-tab[data-chosen]::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--ops-accent);
+}
+
+/* Short facts with a number and a sentence, for the overview tab. */
+.ops-facts {
+  display: grid;
+}
+.ops-fact {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--ops-line-soft);
+}
+.ops-fact:last-child {
+  border-bottom: 0;
+}
+
+/* A small square picture in a table cell: a program's image, a campus's logo. */
+.ops-thumb {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--ops-line-soft);
+}
+.ops-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ops-thumb[data-empty] {
+  background: linear-gradient(140deg, var(--ops-accent-soft), var(--ops-good-soft));
+  color: var(--ops-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+.ops-thumb-lg {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  font-size: 20px;
+}
+.ops-thumb-lg img {
+  object-fit: contain;
+}
+
+/* A picture with its replace control beside it. */
+.ops-imagefield {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--ops-line);
+  border-radius: 10px;
+  background: var(--ops-bg);
+}
+.ops-imagefield-preview {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-line);
+  color: var(--ops-faint);
+}
+.ops-imagefield-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ops-imagefield-preview[data-empty] {
+  border-style: dashed;
+}
+
+/*
+  A skeleton shaped like a table, without answering to `.ops-table`.
+
+  Suspense fallbacks live inside the page now rather than in a `loading.tsx`
+  that is replaced wholesale, so for a moment while a list streams the fallback
+  and the real rows are both in the document. Sharing a class name there makes
+  every "the table has N rows" assertion ambiguous, and makes selectors in the
+  browser console lie about what they matched.
+*/
+.ops-skel-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ops-skel-table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--ops-line-soft);
+  vertical-align: middle;
+}
+.ops-skel-table tr:last-child td {
+  border-bottom: 0;
+}
+
+/* A label acting as a button, while its input is not usable yet. */
+.ops-btn[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* A record being created inline, inside the form that needs it. */
+.ops-newprogram {
+  border: 1px dashed var(--ops-accent);
+  border-radius: 10px;
+  background: var(--ops-accent-soft);
+  padding: 12px;
+}
+
+/* =====================================================================
+   SEARCHABLE PICKER
+
+   For the filters where the list is long enough that a <select> stops being a
+   control and becomes a scrollbar. The calendar's class filter is the case:
+   four hundred sessions across 28 classes, and the same curriculum under one
+   title at five campuses, so the one you want looks identical to four you do
+   not.
+   ===================================================================== */
+.ops-picker {
+  position: relative;
+  min-width: 240px;
+}
+.ops-picker-field {
+  position: relative;
+}
+.ops-picker-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ops-faint);
+  pointer-events: none;
+}
+.ops-picker-input {
+  width: 100%;
+  padding-left: 29px;
+}
+.ops-picker-chosen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 280px;
+  text-align: left;
+  border-color: var(--ops-accent);
+  background: var(--ops-accent-soft);
+  color: var(--ops-accent);
+  font-weight: 500;
+}
+.ops-picker-x {
+  margin-left: auto;
+  display: inline-flex;
+  opacity: 0.65;
+}
+.ops-picker-x:hover {
+  opacity: 1;
+}
+
+.ops-picker-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 340px;
+  max-width: 90vw;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--ops-line);
+  border-radius: 10px;
+  background: var(--ops-surface);
+  box-shadow: 0 12px 30px rgb(16 24 40 / 0.14);
+  padding: 4px;
+}
+.ops-picker-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 7px;
+  line-height: 1.35;
+}
+.ops-picker-option[data-active],
+.ops-picker-option:hover {
+  background: var(--ops-accent-soft);
+}
+.ops-picker-meta {
+  display: block;
+  color: var(--ops-muted);
+  font-size: 11.5px;
+}
+.ops-picker-empty {
+  padding: 10px;
+  color: var(--ops-muted);
 }

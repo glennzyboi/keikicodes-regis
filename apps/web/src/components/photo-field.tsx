@@ -26,8 +26,45 @@ import "./photo-field.css";
  */
 
 const MAX_EDGE = 720;
-const MAX_BYTES = 5 * 1024 * 1024;
-const ACCEPT = ["image/jpeg", "image/png", "image/webp"];
+const MAX_BYTES = 15 * 1024 * 1024;
+
+/**
+ * What the file input offers, and what we will try to decode.
+ *
+ * HEIC and HEIF are here because that is what an iPhone photo library actually
+ * contains, and leaving them out meant a parent picking a photo of their own
+ * child was told "That is a HEIC file". What we *upload* is always JPEG, because
+ * `downscale` re-encodes through a canvas, so the bucket's allowed types do not
+ * change.
+ *
+ * The size cap is on the file chosen, not the file stored: a 12MP phone photo is
+ * comfortably over 5MB before downscaling and about 80KB after it.
+ */
+const ACCEPT = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/avif",
+];
+
+/**
+ * A random file name that works outside a secure context.
+ *
+ * `crypto.randomUUID` is undefined over plain HTTP on anything but localhost,
+ * which is exactly how anyone tests on a phone against a laptop's LAN address.
+ * It threw inside the try and surfaced as "We could not save that photo:
+ * crypto.randomUUID is not a function", which sounds like the photo's fault.
+ */
+function randomName(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 type State = "empty" | "working" | "done" | "error";
 
@@ -76,20 +113,26 @@ export function PhotoField({
   const [preview, setPreview] = useState<string | null>(null);
 
   async function handle(file: File | undefined) {
+    // Clear the input straight away, so picking the SAME file again fires a
+    // change event. Without this the obvious way to retry a failed upload,
+    // choosing that photo once more, did nothing at all and the field looked
+    // dead.
+    if (inputRef.current) inputRef.current.value = "";
     if (!file) return;
 
-    if (!ACCEPT.includes(file.type)) {
+    // An empty file.type is normal, not a fault: some Android pickers and some
+    // HEIC files report nothing at all. Let the decoder be the judge rather
+    // than refusing on a header the OS declined to supply.
+    if (file.type && !ACCEPT.includes(file.type)) {
       setState("error");
       setMessage(
-        file.type
-          ? `That is a ${file.type.split("/")[1].toUpperCase()} file. We need a photo: JPEG, PNG or WebP.`
-          : "We need a photo: JPEG, PNG or WebP.",
+        `That is a ${file.type.split("/")[1].toUpperCase()} file, which we cannot read. A photo from your camera roll will work.`,
       );
       return;
     }
     if (file.size > MAX_BYTES) {
       setState("error");
-      setMessage("That photo is larger than 5MB. Try one taken at a smaller size.");
+      setMessage("That photo is very large. Try one taken at a smaller size.");
       return;
     }
 
@@ -97,23 +140,49 @@ export function PhotoField({
     setMessage(null);
 
     try {
-      const blob = await downscale(file);
-      const key = `${parentId}/${crypto.randomUUID()}.jpg`;
+      let blob: Blob;
+      try {
+        blob = await downscale(file);
+      } catch {
+        // The browser could not decode it. On a desktop browser with no HEIC
+        // support this is the honest answer, and it is a different problem from
+        // the upload failing.
+        throw new Error(
+          "This browser cannot read that image. Try a JPEG or PNG, or pick it on your phone.",
+        );
+      }
+
+      const key = `${parentId}/${randomName()}.jpg`;
 
       const { error } = await supabaseBrowser()
         .storage.from("child-photos")
         .upload(key, blob, { contentType: "image/jpeg", upsert: false });
 
-      if (error) throw error;
+      if (error) {
+        // A storage policy refusal is almost always a signed out session, and
+        // "row level security" is not a sentence to show a parent. The policy
+        // keys on the parents row behind auth.uid(), so no session means no
+        // folder to write into.
+        const denied =
+          /row-level security|violates|policy|jwt|unauthor/i.test(error.message) ||
+          (error as { statusCode?: string }).statusCode === "403";
+        throw new Error(
+          denied
+            ? "Your sign in seems to have expired. Please sign in again, then choose the photo."
+            : error.message,
+        );
+      }
 
       setPreview(URL.createObjectURL(blob));
       setState("done");
       onChange(key);
     } catch (err) {
       setState("error");
+      // The form is told, so a failed upload cannot be paid past unnoticed.
+      onChange(null);
       setMessage(
         err instanceof Error && err.message
-          ? `We could not save that photo: ${err.message}`
+          ? err.message
           : "We could not save that photo. Try again, or pick a different one.",
       );
     }
@@ -157,7 +226,12 @@ export function PhotoField({
             id={id}
             type="file"
             accept={ACCEPT.join(",")}
-            capture="user"
+            // No `capture`. It used to be capture="user", which on iOS Safari
+            // and Android Chrome opens the FRONT camera and removes any route to
+            // the photo library, so a parent could not pick a photo of their
+            // child at all: the camera that opened was pointed at them. Without
+            // it the OS offers camera and library both, which is the choice they
+            // actually want.
             required={required && !value}
             onChange={(e) => handle(e.target.files?.[0])}
           />
@@ -180,7 +254,7 @@ export function PhotoField({
           )}
           <p className="kc-photo-hint">
             {state === "error" ? (
-              <span role="alert" className="text-sun-deep">
+              <span role="alert" className="kc-field-error">
                 {message}
               </span>
             ) : state === "done" ? (

@@ -5,17 +5,16 @@ import { redirect } from "next/navigation";
 import { supabaseServer, currentStaff } from "@/lib/staff-auth";
 import { asUser } from "@keiki/core/rls";
 import { issueRefund } from "@keiki/core/refunds";
-import { enqueue, recipientsForClass, inSchoolTime } from "@keiki/core/notify";
+import { enqueue } from "@keiki/core/notify";
 import {
   parseForm,
   SignInForm,
   EnrollmentIdForm,
   ApproveCancellationForm,
-  CancelSessionForm,
-  RescheduleSessionForm,
   SupportNoteForm,
   NotificationIdForm,
   TransferForm,
+  DropForm,
 } from "@keiki/core/forms";
 
 export async function signIn(_prev: string | null, formData: FormData): Promise<string | null> {
@@ -199,154 +198,14 @@ export async function markRefunded(formData: FormData) {
   revalidatePath("/admin");
 }
 
-/**
- * Cancel one session of a class. Instructor is sick, campus is closed.
- *
- * The class and everyone's place in it are untouched. Only this date stops.
- */
-export async function cancelSession(formData: FormData) {
-  const staff = await currentStaff();
-  if (!staff) redirect("/admin/login");
-
-  const parsed = parseForm(CancelSessionForm, formData);
-  if (!parsed.ok) return;
-  const { sessionId, note } = parsed.data;
-
-  await asUser(staff.authUserId, async (tx) => {
-    const [session] = await tx<
-      {
-        id: string;
-        class_offering_id: string;
-        starts_at: Date;
-        title: string;
-        school: string;
-        timezone: string;
-      }[]
-    >`update sessions s
-         set status = 'cancelled', note = ${note}
-        from class_offerings c, schools sc
-       where s.id = ${sessionId}
-         and s.status = 'scheduled'
-         and c.id = s.class_offering_id
-         and sc.id = c.school_id
-      returning s.id, s.class_offering_id, s.starts_at,
-                c.title, sc.name as school, sc.timezone`;
-
-    if (!session) return;
-
-    // The next session that still stands, so the email can tell families when
-    // they are next expected rather than leaving them to work it out.
-    const [next] = await tx<{ starts_at: Date }[]>`
-      select starts_at from sessions
-       where class_offering_id = ${session.class_offering_id}
-         and status = 'scheduled' and starts_at >= now()
-       order by starts_at asc limit 1`;
-
-    // Enqueued in the same transaction as the cancellation. Either the class is
-    // cancelled and everyone is told, or neither happened.
-    for (const r of await recipientsForClass(tx, session.class_offering_id)) {
-      await enqueue(tx, {
-        template: "session_cancelled",
-        toAddress: r.email,
-        toName: r.parent_name,
-        parentId: r.parent_id,
-        childId: r.child_id,
-        enrollmentId: r.enrollment_id,
-        classOfferingId: session.class_offering_id,
-        sessionId: session.id,
-        payload: {
-          className: session.title,
-          school: session.school,
-          sessionDate: inSchoolTime(new Date(session.starts_at), session.timezone),
-          nextSession: next ? inSchoolTime(new Date(next.starts_at), session.timezone) : null,
-          note,
-        },
-        dedupeKey: `session_cancelled:${session.id}:${r.enrollment_id}`,
-      });
-    }
-  });
-
-  revalidatePath("/admin");
-  revalidatePath("/admin/classes");
-}
-
-/**
- * Move a session to another date.
- *
- * The original row is kept and pointed at by rescheduled_from rather than
- * overwritten, so the history of what parents were told still exists. A class
- * that moved twice reads as two moves, not one mystery.
- */
-export async function rescheduleSession(formData: FormData) {
-  const staff = await currentStaff();
-  if (!staff) redirect("/admin/login");
-
-  const parsed = parseForm(RescheduleSessionForm, formData);
-  if (!parsed.ok) return;
-  const { sessionId, newDate, note } = parsed.data;
-
-  await asUser(staff.authUserId, async (tx) => {
-    const [original] = await tx<
-      { id: string; class_offering_id: string; seq: number; starts_at: Date; ends_at: Date }[]
-    >`select id, class_offering_id, seq, starts_at, ends_at
-        from sessions where id = ${sessionId} and status = 'scheduled'`;
-    if (!original) return;
-
-    const lengthMs = original.ends_at.getTime() - original.starts_at.getTime();
-
-    // Keep the time of day, move the date. A class that runs 3pm to 4pm still
-    // runs 3pm to 4pm on the new day.
-    const old = original.starts_at;
-    const [y, m, d] = newDate.split("-").map(Number);
-    const moved = new Date(old);
-    moved.setUTCFullYear(y, m - 1, d);
-
-    await tx`update sessions set status = 'rescheduled', note = ${note}
-              where id = ${original.id}`;
-
-    // seq is unique per class, so the replacement takes the next free one
-    // rather than reusing the original's and colliding on a second move.
-    const [replacement] = await tx<{ id: string }[]>`
-      insert into sessions
-        (class_offering_id, seq, starts_at, ends_at, status, rescheduled_from, note)
-      values (${original.class_offering_id},
-              (select coalesce(max(seq), 0) + 1 from sessions
-                where class_offering_id = ${original.class_offering_id}),
-              ${moved.toISOString()},
-              ${new Date(moved.getTime() + lengthMs).toISOString()},
-              'scheduled', ${original.id}, ${note})
-      returning id`;
-
-    const [ctx] = await tx<{ title: string; school: string; timezone: string }[]>`
-      select c.title, sc.name as school, sc.timezone
-        from class_offerings c join schools sc on sc.id = c.school_id
-       where c.id = ${original.class_offering_id}`;
-
-    for (const r of await recipientsForClass(tx, original.class_offering_id)) {
-      await enqueue(tx, {
-        template: "session_rescheduled",
-        toAddress: r.email,
-        toName: r.parent_name,
-        parentId: r.parent_id,
-        childId: r.child_id,
-        enrollmentId: r.enrollment_id,
-        classOfferingId: original.class_offering_id,
-        sessionId: replacement.id,
-        payload: {
-          className: ctx.title,
-          school: ctx.school,
-          oldDate: inSchoolTime(new Date(original.starts_at), ctx.timezone),
-          newDate: inSchoolTime(moved, ctx.timezone),
-          note,
-        },
-        dedupeKey: `session_rescheduled:${replacement.id}:${r.enrollment_id}`,
-      });
-    }
-  });
-
-  revalidatePath("/admin");
-  revalidatePath("/admin/classes");
-}
+// Cancelling and moving a session used to live here as two functions that only
+// ever acted on the next date. They are now @keiki/core/schedule, driven from
+// ./schedule-actions.ts, because the office needs to reach any date, several at
+// once, and to put one back.
+//
+// The move was also broken: the catalogue migration made sessions.session_date
+// NOT NULL and the insert here never set it, so every reschedule threw. No test
+// moved a class, so it shipped.
 
 /**
  * Log a contact with a family.
@@ -488,4 +347,62 @@ export async function transferEnrollment(formData: FormData): Promise<void> {
 
   revalidatePath("/admin/families", "layout");
   revalidatePath("/admin/classes", "layout");
+}
+
+/**
+ * A child stops coming.
+ *
+ * Not a cancellation, and the difference is the point. A cancellation is a
+ * family asking for something, waiting on a decision, and usually ending in
+ * money going back. This is the office writing down that a child stopped
+ * attending: it frees the seat immediately, records why and from which session,
+ * and leaves the money alone unless somebody separately decides otherwise.
+ *
+ * Before this there was nowhere to put that. The only way to get a child off a
+ * roster was to approve a cancellation, which either paid back money nobody had
+ * asked for or, more often, was avoided entirely, so the child stayed on the
+ * roster and the seat stayed locked for the rest of the term.
+ *
+ * The seat is freed inside the same transaction as the status change, exactly
+ * as an approved cancellation does, so the counter and the records cannot
+ * disagree even if something later in this action throws.
+ */
+export async function dropFromClass(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const parsed = parseForm(DropForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId, reasonCode, note, fromSessionId } = parsed.data;
+
+  const done = await asUser(staff.authUserId, async (tx) => {
+    // Only a place that is currently held. Dropping an already dropped or
+    // cancelled enrollment would release a seat that was released once already,
+    // and the counter would drift below the truth.
+    const [row] = await tx<{ id: string; class_offering_id: string }[]>`
+      update enrollments
+         set status = 'dropped',
+             dropped_at = now(),
+             dropped_reason_code = ${reasonCode},
+             dropped_note = ${note},
+             dropped_by = ${staff.email},
+             dropped_from_session_id = ${fromSessionId}
+       where id = ${enrollmentId}
+         and status in ('active', 'cancellation_requested')
+      returning id, class_offering_id`;
+
+    if (!row) return null;
+
+    await tx`select release_seat(${row.class_offering_id})`;
+    await tx`insert into enrollment_events (enrollment_id, event, payload)
+             values (${row.id}, 'dropped',
+                     ${JSON.stringify({ by: staff.email, reason: reasonCode, note })}::jsonb)`;
+    return row;
+  });
+
+  if (done) {
+    revalidatePath("/admin/classes", "layout");
+    revalidatePath("/admin/students", "layout");
+    revalidatePath("/dashboard");
+  }
 }

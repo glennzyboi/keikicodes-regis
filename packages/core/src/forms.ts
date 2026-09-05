@@ -54,11 +54,24 @@ export function text(max: number, min = 1) {
     .refine((v) => v.length <= max, `Please keep this under ${max} characters`);
 }
 
+/**
+ * Free text a human may or may not have typed.
+ *
+ * `.optional()` matters and was missing. An unticked checkbox is absent from
+ * FormData, and so is a field the form simply did not render: the restore
+ * button has no note box at all, so `note` never arrived and zod refused the
+ * whole submission with "expected string, received undefined". A field called
+ * optional that a form is required to render is not optional, and the bug it
+ * causes surfaces as an unreadable validation error rather than as anything to
+ * do with the missing input.
+ *
+ * Found by clicking the button, not by reading the code.
+ */
 export function optionalText(max: number) {
   return z
     .string()
-    .transform(stripControl)
-    .transform((v) => v.trim())
+    .optional()
+    .transform((v) => stripControl(v ?? "").trim())
     .refine((v) => v.length <= max, `Please keep this under ${max} characters`)
     .transform((v) => (v.length === 0 ? null : v));
 }
@@ -87,7 +100,7 @@ export const cents = z.coerce
  * out of a domain families already trust. Protocol relative URLs are the case
  * people forget, because they start with a slash and look internal.
  */
-export function safeNext(next: unknown, fallback = "/portal") {
+export function safeNext(next: unknown, fallback = "/dashboard") {
   if (typeof next !== "string") return fallback;
   if (!next.startsWith("/")) return fallback;
   if (next.startsWith("//")) return fallback;
@@ -152,17 +165,6 @@ export const ApproveCancellationForm = z.object({
   refundCents: cents,
 });
 
-export const CancelSessionForm = z.object({
-  sessionId: uuid,
-  note: optionalText(500),
-});
-
-export const RescheduleSessionForm = z.object({
-  sessionId: uuid,
-  newDate: isoDate,
-  note: optionalText(500),
-});
-
 export const SupportNoteForm = z.object({
   parentId: uuid,
   childId: z
@@ -205,10 +207,14 @@ export const clockTime = z
   .regex(/^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/, "Use the time picker")
   .transform((v) => (v.length === 5 ? `${v}:00` : v));
 
+// Same hole as optionalText had: without .optional() a form that does not
+// render the field at all fails validation rather than storing nothing. Fixed
+// here too rather than waiting for it to be found the same way.
 const optionalUrl = z
   .string()
-  .trim()
-  .max(500)
+  .optional()
+  .transform((v) => (v ?? "").trim())
+  .refine((v) => v.length <= 500, "Please keep this under 500 characters")
   .refine((v) => v === "" || /^https?:\/\//i.test(v), "Links must start with http or https")
   .transform((v) => (v === "" ? null : v));
 
@@ -251,7 +257,21 @@ export const OfferingForm = z
   .object({
     offeringId: z.union([uuid, z.literal("")]).optional(),
     schoolId: uuid,
-    programId: uuid,
+    /**
+     * An existing program, or the literal "new".
+     *
+     * Making somebody create a program on one page and a class on another is the
+     * step people got stuck on, and fairly: from the outside it looks like
+     * filling in the same thing twice. The distinction is real and worth keeping
+     * in the data, because one program genuinely does run at several campuses
+     * with its own price and day at each. It is not worth making an office learn
+     * that before they can add their first class, so the class form can create
+     * the program as it goes.
+     */
+    programId: z.union([uuid, z.literal("new")]),
+    newProgramName: optionalText(160),
+    newProgramTrack: optionalText(60),
+    newProgramSubject: optionalText(80),
     termId: uuid,
     title: text(160, 2),
     weekday: z.coerce.number().int().min(0).max(6),
@@ -319,7 +339,11 @@ export const OfferingForm = z
       message: "The first date has to fall on the day of the week the class runs",
       path: ["firstSessionDate"],
     },
-  );
+  )
+  .refine((v) => v.programId !== "new" || (v.newProgramName?.trim().length ?? 0) >= 2, {
+    message: "Give the new program a name",
+    path: ["newProgramName"],
+  });
 
 export const OfferingIdForm = z.object({ offeringId: uuid });
 export const SchoolIdForm = z.object({ schoolId: uuid });
@@ -329,4 +353,134 @@ export const TermIdForm = z.object({ termId: uuid });
 export const ImportForm = z.object({
   source: z.enum(["live", "snapshot"]),
   dryRun: checkbox,
+});
+
+// ---------------------------------------------------------------------------
+// The schedule.
+//
+// Every one of these takes a reason code as well as a note. The note is what
+// the family reads; the code is what the office counts at the end of term. A
+// free text field alone gives you "instructor sick", "Instructor Sick", "sick
+// teacher" and "N/A", which answers no question anybody has.
+// ---------------------------------------------------------------------------
+
+export const cancelReason = z.enum([
+  "holiday",
+  "instructor_unavailable",
+  "campus_closed",
+  "weather",
+  "low_enrollment",
+  "facility",
+  "other",
+]);
+
+const optionalClockTime = z
+  .union([clockTime, z.literal("")])
+  .optional()
+  .transform((v) => (v ? v : null));
+
+/** One or many session ids. A single hidden input and a set of checkboxes both
+ *  arrive as repeated keys, so this accepts a comma separated list. */
+export const sessionIdList = z
+  .string()
+  .transform((v) => v.split(",").map((s) => s.trim()).filter(Boolean))
+  .refine((v) => v.length > 0, "Choose at least one date")
+  .refine((v) => v.length <= 60, "That is more than sixty dates in one go")
+  .refine(
+    (v) => v.every((id) => uuid.safeParse(id).success),
+    "One of those dates does not look right",
+  );
+
+export const CancelSessionForm = z.object({
+  sessionIds: sessionIdList,
+  reasonCode: cancelReason,
+  note: optionalText(500),
+  notify: checkbox,
+});
+
+export const RestoreSessionForm = z.object({
+  sessionId: uuid,
+  note: optionalText(500),
+  notify: checkbox,
+});
+
+export const RescheduleSessionForm = z.object({
+  sessionId: uuid,
+  newDate: isoDate,
+  startTime: optionalClockTime,
+  endTime: optionalClockTime,
+  reasonCode: cancelReason,
+  note: optionalText(500),
+  notify: checkbox,
+});
+
+export const ShiftSessionsForm = z.object({
+  sessionIds: sessionIdList,
+  byDays: z.coerce
+    .number()
+    .int("Whole days only")
+    .refine((v) => v !== 0, "Say how many days to move by")
+    .refine((v) => Math.abs(v) <= 365, "That is more than a year"),
+  reasonCode: cancelReason,
+  note: optionalText(500),
+  notify: checkbox,
+});
+
+export const AddSessionForm = z.object({
+  classOfferingId: uuid,
+  date: isoDate,
+  startTime: optionalClockTime,
+  endTime: optionalClockTime,
+  note: optionalText(500),
+  notify: checkbox,
+});
+
+/**
+ * A parent's cancellation request.
+ *
+ * The note is required when the reason is "other", because "another reason"
+ * with nothing after it is the same as no reason at all.
+ */
+export const ParentCancelBody = z
+  .object({
+    enrollmentId: uuid,
+    reasonCode: z.enum([
+      "schedule_conflict",
+      "child_not_enjoying",
+      "moved_away",
+      "cost",
+      "illness",
+      "wrong_class",
+      "other",
+    ]),
+    note: z
+      .string()
+      .max(1000, "Please keep this under 1000 characters")
+      .optional()
+      .transform((v) => {
+        const cleaned = stripControl(v ?? "").trim();
+        return cleaned.length === 0 ? null : cleaned;
+      }),
+  })
+  .refine((v) => v.reasonCode !== "other" || (v.note && v.note.length >= 3), {
+    message: "Please tell us a little about why",
+    path: ["note"],
+  });
+
+/**
+ * Taking a child off a class roster.
+ *
+ * `fromSessionId` is optional and means "the first session they did not
+ * attend". With `starts_from_session_id` on the other end, that is what lets a
+ * roster say "week 3 to week 8", which is the span a pro-rata conversation
+ * actually starts from.
+ */
+export const DropForm = z.object({
+  enrollmentId: uuid,
+  reasonCode: z.string().min(2).max(40),
+  note: optionalText(500),
+  fromSessionId: z
+    .union([uuid, z.literal("")])
+    .optional()
+    .transform((v) => (v ? v : null)),
 });

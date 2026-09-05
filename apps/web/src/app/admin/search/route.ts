@@ -91,14 +91,14 @@ export async function GET(req: Request) {
       id: c.id,
       title: c.title,
       subtitle: `${c.school} · ${c.seats} seats`,
-      href: `/admin/catalogue/classes/${c.id}`,
+      href: `/admin/classes/${c.id}`,
     })),
     ...campuses.map((s) => ({
       kind: "campus" as const,
       id: s.id,
       title: s.name,
       subtitle: `${s.n} ${s.n === 1 ? "class" : "classes"}`,
-      href: `/admin/catalogue/classes?q=${encodeURIComponent(s.name)}`,
+      href: `/admin/classes?q=${encodeURIComponent(s.name)}`,
     })),
   ];
 

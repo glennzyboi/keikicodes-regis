@@ -78,7 +78,22 @@ export async function copyImage(
     if (!res.ok) {
       // 410 is the normal answer for an Airtable URL that has aged out, which
       // is the whole reason this function exists.
-      return { url: sourceUrl, copied: false, problem: `source answered ${res.status}` };
+      //
+      // A dead source is stored as null rather than kept. Keeping it means
+      // writing a link we have just proved is broken, and every page that shows
+      // one then renders a broken image instead of the initial-letter fallback
+      // it has for exactly this case. A picture we cannot get is better
+      // represented by no picture than by a URL known to 410.
+      //
+      // Only for the permanent answers. A timeout or a 5xx is the source having
+      // a bad minute, and throwing away a URL that will work again tomorrow
+      // would be worse than keeping it.
+      const permanentlyGone = res.status === 404 || res.status === 410 || res.status === 403;
+      return {
+        url: permanentlyGone ? null : sourceUrl,
+        copied: false,
+        problem: `source answered ${res.status}${permanentlyGone ? ", link dropped" : ""}`,
+      };
     }
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();

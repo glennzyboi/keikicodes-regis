@@ -1,0 +1,109 @@
+/* =====================================================================
+   MODAL
+
+   Host agnostic. Every colour comes from a --mdl-* variable that the console
+   and the parent site each set, so the dialog looks native on both without two
+   copies of the layout to keep in step.
+
+   It exists because of a real layout failure: the schedule editor's forms
+   started inside the table cell of the row they acted on, and a reason picker,
+   a note field and a refusal sentence in one <td> stretched the row to five
+   times its height and pulled every other column out of line. A table is for
+   reading. Anything you type goes on top of it.
+   ===================================================================== */
+.mdl-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding: 8vh 16px 16px;
+  overflow-y: auto;
+  background: var(--mdl-scrim, rgb(16 24 40 / 0.45));
+
+  opacity: 1;
+  transition: opacity 180ms var(--mdl-ease, cubic-bezier(0.23, 1, 0.32, 1));
+}
+@starting-style {
+  .mdl-backdrop {
+    opacity: 0;
+  }
+}
+
+.mdl-panel {
+  width: 100%;
+  background: var(--mdl-surface, #fff);
+  color: var(--mdl-text, #101828);
+  border: 1px solid var(--mdl-line, #e4e7ec);
+  border-radius: var(--mdl-radius, 14px);
+  box-shadow: 0 24px 60px -12px rgb(16 24 40 / 0.3);
+  overflow: hidden;
+  font: var(--mdl-font, 500 13px/1.5 ui-sans-serif, system-ui, sans-serif);
+
+  /* Never from scale(0). Nothing in the real world appears out of nothing, and
+     a panel that grows from a point reads as a glitch rather than an arrival. */
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    opacity 180ms var(--mdl-ease, cubic-bezier(0.23, 1, 0.32, 1)),
+    transform 180ms var(--mdl-ease, cubic-bezier(0.23, 1, 0.32, 1));
+}
+@starting-style {
+  .mdl-panel {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+.mdl-panel:focus {
+  outline: none;
+}
+
+.mdl-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: var(--mdl-pad, 14px 16px);
+  border-bottom: 1px solid var(--mdl-line, #e4e7ec);
+}
+.mdl-title {
+  font-family: var(--mdl-title-font, inherit);
+  font-size: var(--mdl-title-size, 15px);
+  font-weight: 600;
+  color: var(--mdl-title-color, inherit);
+}
+.mdl-description {
+  margin-top: 2px;
+  color: var(--mdl-muted, #667085);
+}
+
+.mdl-close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--mdl-muted, #667085);
+  cursor: pointer;
+  flex: none;
+  transition: background-color 130ms ease, color 130ms ease;
+}
+.mdl-close:hover {
+  background: var(--mdl-hover, #eff1f4);
+  color: var(--mdl-text, #101828);
+}
+.mdl-close:focus-visible {
+  outline: 2px solid var(--mdl-accent, #2563eb);
+  outline-offset: 1px;
+}
+
+.mdl-body {
+  padding: var(--mdl-body-pad, 16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mdl-backdrop,
+  .mdl-panel {
+    transition: none;
+  }
+}

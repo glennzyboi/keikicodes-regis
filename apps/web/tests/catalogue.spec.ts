@@ -230,16 +230,16 @@ test.describe("the catalogue console", () => {
     const program = unique("Probe Program").replace(/-/g, " ");
 
     // A campus.
-    await page.goto("/admin/catalogue/schools");
-    await page.getByRole("button", { name: "Add a campus" }).click();
+    await page.goto("/admin/setup/campuses");
+    await page.getByRole("button", { name: "New campus" }).click();
     await page.locator("#name").fill(campus);
     await page.locator("#timezone").fill("Pacific/Honolulu");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByText(`${campus} saved.`)).toBeVisible({ timeout: 20_000 });
 
     // A program.
-    await page.goto("/admin/catalogue/programs");
-    await page.getByRole("button", { name: "Add a program" }).click();
+    await page.goto("/admin/setup/programs");
+    await page.getByRole("button", { name: "New program" }).click();
     await page.locator("#name").fill(program);
     await page.locator("#subject").fill("Virtual Reality");
     await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -256,7 +256,7 @@ test.describe("the catalogue console", () => {
     expect(prog, "the program was created").toBeTruthy();
 
     // A class joining them, through the form.
-    await page.goto("/admin/catalogue/classes/new");
+    await page.goto("/admin/classes/new");
     await page.locator("select[name=programId]").selectOption(prog.id);
     await page.locator("select[name=schoolId]").selectOption(school.id);
     await page.locator("input[name=title]").fill(`${program} at ${campus}`);
@@ -304,7 +304,7 @@ test.describe("the catalogue console", () => {
       await sql`update class_offerings set seats_taken = 4 where id = ${cls.id}`;
 
       await signInStaff(page);
-      await page.goto(`/admin/catalogue/classes/${cls.id}`);
+      await page.goto(`/admin/classes/${cls.id}/edit`);
       await page.locator("input[name=capacity]").fill("2");
 
       // The form says so before the save, naming the number.
@@ -335,7 +335,7 @@ test.describe("the catalogue console", () => {
                 values (${cls.id}, ${child.id}, 'active')`;
 
       await signInStaff(page);
-      await page.goto(`/admin/catalogue/classes/${cls.id}`);
+      await page.goto(`/admin/classes/${cls.id}/edit`);
 
       // The button is disabled, and the panel explains what to do instead.
       await expect(page.getByRole("button", { name: "Delete this class" })).toBeDisabled();
@@ -343,7 +343,7 @@ test.describe("the catalogue console", () => {
 
       // And the action refuses even when called directly, because a disabled
       // button is a courtesy rather than a control.
-      const res = await page.request.post(`/admin/catalogue/classes/${cls.id}`, {
+      const res = await page.request.post(`/admin/classes/${cls.id}/edit`, {
         form: { offeringId: cls.id },
       });
       expect(res.status()).toBeLessThan(500);

@@ -80,7 +80,7 @@ function Confirming() {
             for lives in your account.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
-            <Link href="/portal" className="kc-btn kc-btn-primary">
+            <Link href="/dashboard" className="kc-btn kc-btn-primary">
               View my registrations
             </Link>
             <Link href="/" className="kc-btn kc-btn-quiet">

@@ -14,10 +14,24 @@ if (!connectionString) throw new Error("DATABASE_URL is not set");
  */
 const globalForDb = globalThis as unknown as { sql?: ReturnType<typeof postgres> };
 
+/**
+ * Twenty is right for one long lived server against its own Postgres. It is
+ * wrong for a serverless deployment, where every warm instance holds its own
+ * pool against a shared Supabase pooler and the ceiling is reached by having
+ * many small pools rather than one big one. So it is a number, not a constant,
+ * and production sets it low.
+ *
+ * `prepare: false` is not an optimisation. Supabase's transaction pooler hands
+ * a different backend to each statement, so a named prepared statement made on
+ * one is missing on the next. Without this, everything works locally and fails
+ * intermittently the moment it is deployed behind the pooler.
+ */
+const poolMax = Number(process.env.DATABASE_POOL_MAX ?? 20);
+
 export const sql =
   globalForDb.sql ??
   postgres(connectionString, {
-    max: 20,
+    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 20,
     prepare: false,
     onnotice: () => {},
   });

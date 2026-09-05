@@ -19,6 +19,9 @@ export type TemplateName =
   | "registration_confirmed"
   | "session_cancelled"
   | "session_rescheduled"
+  | "session_restored"
+  | "session_added"
+  | "sessions_shifted"
   | "class_reminder"
   | "cancellation_approved"
   | "schedule_changed";
@@ -131,7 +134,7 @@ export type Payload = Record<string, unknown>;
  */
 export function render(template: TemplateName, p: Payload): Rendered {
   const appUrl = (p.appUrl as string) ?? process.env.APP_URL ?? "http://localhost:3000";
-  const portal = `${appUrl}/portal`;
+  const portal = `${appUrl}/dashboard`;
 
   switch (template) {
     case "registration_confirmed": {
@@ -200,12 +203,17 @@ export function render(template: TemplateName, p: Payload): Rendered {
 
     case "session_rescheduled": {
       const subject = `Moved: ${p.className} is now ${p.newDate}`;
+      // The office can now change the time as well as the date, so this line
+      // has to be told which happened. It used to say "same time, same room"
+      // unconditionally, which would have been a lie the first time somebody
+      // moved a 3pm class to a 9am Saturday.
+      const sameTime = p.timeChanged ? "Note the new time." : "Same time, same room.";
       return {
         subject,
         html: layout({
           preheader: `${p.className} moves from ${p.oldDate} to ${p.newDate}.`,
           heading: "A class has moved",
-          body: `<p style="margin:0;">The ${escape(p.className)} session on ${escape(p.oldDate)} has moved to ${escape(p.newDate)}. Same time, same room.</p>
+          body: `<p style="margin:0;">The ${escape(p.className)} session on ${escape(p.oldDate)} has moved to ${escape(p.newDate)}. ${escape(sameTime)}</p>
                  ${p.note ? `<p style="margin:14px 0 0;padding:12px 14px;background:${BRAND.wash};border-radius:10px;">${escape(p.note)}</p>` : ""}
                  ${rows([
                    ["Class", String(p.className)],
@@ -216,12 +224,101 @@ export function render(template: TemplateName, p: Payload): Rendered {
           cta: { label: "See my registrations", url: portal },
         }),
         text: [
-          `The ${p.className} session on ${p.oldDate} has moved to ${p.newDate}. Same time, same room.`,
+          `The ${p.className} session on ${p.oldDate} has moved to ${p.newDate}. ${sameTime}`,
           p.note ? `\n${p.note}` : "",
           ``,
           `Campus: ${p.school}`,
           ``,
           portal,
+        ].join("\n"),
+      };
+    }
+
+    case "session_restored": {
+      // A cancellation put back. Worth its own message rather than silence:
+      // a family told on Monday that Tuesday is off will not turn up on
+      // Tuesday unless somebody tells them it is on again.
+      const subject = `Back on: ${p.className} on ${p.sessionDate}`;
+      return {
+        subject,
+        html: layout({
+          preheader: `${p.className} on ${p.sessionDate} is running after all.`,
+          heading: "That class is running after all",
+          body: `<p style="margin:0;">${escape(p.className)} on ${escape(p.sessionDate)} is back on. We are sorry for the change about.</p>
+                 ${p.note ? `<p style="margin:14px 0 0;padding:12px 14px;background:${BRAND.wash};border-radius:10px;">${escape(p.note)}</p>` : ""}
+                 ${rows([
+                   ["Class", String(p.className)],
+                   ["Campus", String(p.school)],
+                   ["Date", String(p.sessionDate)],
+                 ])}`,
+          cta: { label: "See my registrations", url: portal },
+        }),
+        text: [
+          `${p.className} on ${p.sessionDate} is back on. We are sorry for the change about.`,
+          p.note ? `\n${p.note}` : "",
+          ``,
+          `Campus: ${p.school}`,
+          ``,
+          portal,
+        ].join("\n"),
+      };
+    }
+
+    case "session_added": {
+      const subject = `Extra class: ${p.className} on ${p.sessionDate}`;
+      return {
+        subject,
+        html: layout({
+          preheader: `An extra ${p.className} session on ${p.sessionDate}.`,
+          heading: "An extra session",
+          body: `<p style="margin:0;">We have added a session of ${escape(p.className)} on ${escape(p.sessionDate)}. Your place covers it; there is nothing to pay and nothing to do.</p>
+                 ${p.note ? `<p style="margin:14px 0 0;padding:12px 14px;background:${BRAND.wash};border-radius:10px;">${escape(p.note)}</p>` : ""}
+                 ${rows([
+                   ["Class", String(p.className)],
+                   ["Campus", String(p.school)],
+                   ["Date", String(p.sessionDate)],
+                 ])}`,
+          cta: { label: "See my registrations", url: portal },
+        }),
+        text: [
+          `We have added a session of ${p.className} on ${p.sessionDate}.`,
+          `Your place covers it; there is nothing to pay and nothing to do.`,
+          p.note ? `\n${p.note}` : "",
+          ``,
+          `Campus: ${p.school}`,
+          ``,
+          portal,
+        ].join("\n"),
+      };
+    }
+
+    case "sessions_shifted": {
+      // Several dates moved together, which is what a term slipping actually
+      // looks like. One message, not one per date: a family whose last four
+      // weeks moved does not want four emails saying the same thing.
+      const subject = `${p.className}: some dates have moved`;
+      return {
+        subject,
+        html: layout({
+          preheader: `${p.summary} for ${p.className}.`,
+          heading: "Some dates have moved",
+          body: `<p style="margin:0;">${escape(String(p.summary))} for ${escape(p.className)}. Your place is unaffected and there is nothing to do.</p>
+                 ${p.note ? `<p style="margin:14px 0 0;padding:12px 14px;background:${BRAND.wash};border-radius:10px;">${escape(p.note)}</p>` : ""}
+                 ${rows([
+                   ["Class", String(p.className)],
+                   ["Campus", String(p.school)],
+                   ["Change", String(p.summary)],
+                 ])}
+                 <p style="margin:14px 0 0;">Your registration page has the full list of dates.</p>`,
+          cta: { label: "See the new dates", url: portal },
+        }),
+        text: [
+          `${p.summary} for ${p.className}. Your place is unaffected and there is nothing to do.`,
+          p.note ? `\n${p.note}` : "",
+          ``,
+          `Campus: ${p.school}`,
+          ``,
+          `The full list of dates is on your registration page: ${portal}`,
         ].join("\n"),
       };
     }

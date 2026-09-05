@@ -67,7 +67,7 @@ export default async function CampusPage({ params }: { params: Promise<{ slug: s
           {offerings.length > 0 && (
             <p className="mt-5 max-w-2xl text-sm leading-relaxed text-ink-soft">
               {external === offerings.length
-                ? `${school.name} takes registrations for these classes through their own office. We teach them; they enrol for them.`
+                ? `${school.name} takes registrations for these classes through their own office. We teach them; they enroll for them.`
                 : external > 0
                   ? `${offerings.length - external} of these register here. The other ${external} go through the school's own office, and each one says so and links straight there.`
                   : `${seats} seats still free across this campus.`}

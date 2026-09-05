@@ -1,6 +1,7 @@
 # Build status
 
-*The one document to read before touching anything. Current as of 5 September 2026.*
+*The one document to read before touching anything. Current as of 5 September 2026,
+late.*
 
 ---
 
@@ -16,6 +17,34 @@ Graded on "structure and the decisions behind it", in their own words, not on
 features. Five of their seven questions are about failure and concurrency. The
 brief is `04-the-brief.md`; read it rather than a paraphrase.
 `09-their-questions.md` answers all seven.
+
+---
+
+## What changed in the second pass on 5 September
+
+The first pass made the demo model their real business. This one made the two
+things they will actually press work properly, and it started by finding that
+one of them did not work at all.
+
+**"Move next class" had been broken since the catalogue migration.** That
+migration made `sessions.session_date` NOT NULL; the reschedule insert never set
+it, so every attempt to move a class threw. It shipped because the only session
+test in the suite clicked *Cancel* next class, and nothing had ever moved one.
+That is the single most useful thing to say on camera about testing.
+
+**The schedule is now an editor, not two buttons.** Cancel or move *any* date,
+several at once, shift a whole run when a term slips, add a make up class, and
+put back something cancelled by mistake. Every change records a reason from a
+fixed list and the person who made it, and emailing the families is a tick box
+that defaults to on. Details below.
+
+**A parent now says why they are cancelling.** The old code wrote the literal
+string `'requested by parent'`, which records nothing.
+
+**The parent site has four tabs instead of one.** Home, Programs, Register,
+Dashboard. Browsing and registering were behind the same word, and "My
+registrations" described a list of receipts rather than the calendar people
+actually open it for.
 
 ---
 
@@ -99,6 +128,7 @@ throughout; no real money moves.
 
 ```bash
 pnpm seed                    # reset to a known state, about five seconds
+pnpm check:schedule          # 62 checks on the schedule engine, mostly rolled back
 pnpm seed --snapshot         # same, without calling their live endpoint
 pnpm import:catalogue        # pull their catalogue, live, upserting
 pnpm import:catalogue --dry  # run it all in a transaction and keep none of it
@@ -107,6 +137,43 @@ pnpm thunder                 # 50 simultaneous registrations against one class
 pnpm notify / reminders / sweep
 pnpm test                    # 101 Playwright specs
 ```
+
+---
+
+## The schedule engine
+
+`packages/core/src/schedule.ts`, driven from `apps/web/src/app/admin/schedule-actions.ts`.
+
+| Operation | What it does |
+|---|---|
+| `cancelSessions` | Any number of dates at once, one email covering all of them |
+| `restoreSession` | Puts a cancelled date back, and drops the blackout if it came from one |
+| `moveSession` | New date, optionally a new time. Original kept, marked moved, pointing at the replacement |
+| `shiftSessions` | A whole run by N days, latest first so it never collides with itself |
+| `addSession` | A make up class, on any weekday, that a regeneration will not delete |
+
+Five things it gets right that are worth naming:
+
+1. **A reason is a code, not a sentence.** Free text alone gives you "N/A",
+   "sick" and "Sick teacher" in three rows and answers no question anybody has.
+   The note is kept as well, because no fixed list survives a school year.
+2. **Every change is in `session_events`**, append only, with the staff member
+   who made it. "Who moved week nine" has an answer in February.
+3. **Notifications are written in the same transaction as the change.** A
+   rolled back cancellation cannot leave forty families told about it.
+4. **`for update` on the dates being edited.** Without it, two staff cancelling
+   the same date in the same second both succeeded and the audit trail doubled.
+   Same lesson as `take_seat`: decide the winner with a row lock, not with an
+   `if`.
+5. **A savepoint around the insert.** The row lock cannot help when two people
+   move two *different* dates onto the same new one; only the unique index
+   catches that, and in Postgres a constraint violation poisons the whole
+   transaction. The savepoint turns a 500 into the same sentence the pre-flight
+   check would have produced.
+
+A hand shift records the dates it vacates as blackouts. Without that, the next
+regeneration puts a fresh class back on the empty date and the term silently
+grows by one.
 
 ---
 
@@ -192,7 +259,11 @@ Squarespace code block.
 | A paid seat is never swept | proven directly in SQL, and in the suite |
 | Reminders cannot double send | three runs, one email |
 | A child's photo is private | owning family 200, staff 200, another family denied, anonymous denied |
-| The whole thing | **101 specs, two consecutive green runs, every invariant clean** |
+| A move survives a schedule regeneration | the replacement is `origin = 'manual'`, asserted after calling `generate_sessions` again |
+| Two staff cannot both cancel the same date | two real committed transactions race; one wins, one audit row |
+| Two moves onto one date do not crash | savepoint turns the unique violation into a sentence |
+| A malformed class URL is a real 404 | checked in `src/proxy.ts` before the response starts streaming |
+| The whole thing | **128 specs, two consecutive green runs, no skips, every invariant clean** |
 
 Invariants checked after a full run, all zero: oversold classes, seats that
 cannot be accounted for, children with two live places, paid orders never
@@ -206,7 +277,7 @@ Current catalogue: 19 schools, 10 programs, 28 offerings, 13 of them sold here,
 
 ## The tests
 
-**101 specs across eight files**, about four minutes. Several pay with a real
+**128 specs across ten files**, about six minutes. Several pay with a real
 test card against real Stripe, and one issues a real refund.
 
 | File | What it is for |
@@ -219,6 +290,14 @@ test card against real Stripe, and one issues a real refund.
 | `parent.spec.ts` | Signup through cancellation, and the full money lifecycle |
 | `jobs.spec.ts` | The background jobs, plus eight browser contexts racing |
 | `registration.spec.ts` | The path a family actually walks, end to end |
+| `schedule.spec.ts` | The schedule editor: cancel, restore, move, shift, add, and every refusal |
+| `site.spec.ts` | Navigation, the school combobox, the cards, paging, and the 404s |
+
+There are **no skipped tests**. Three of them used to skip on a fresh database,
+because they needed more students or an existing enrollment than the seed
+provides, so they now create their own data and clean it up. A test that skips
+on a clean machine is worse than no test: the row in the report looks like
+coverage.
 
 The suite reseeds in global setup, so it never inherits the previous run, and
 every spec that breaks something puts it back.
@@ -227,33 +306,53 @@ every spec that breaks something puts it back.
 
 ## Bugs found and fixed, worth mentioning on camera
 
-Twelve are in the git history from 4 September. These are the ones the new work
-found:
+Twelve are in the git history from 4 September, nine more from the first pass on
+the 5th. These are from the second pass, and every one was found by running the
+thing rather than by reading it.
 
-1. **`classes_clash` referred to a column that had been dropped.** Postgres does
-   not check a function body against the schema when a column goes, so the error
-   arrived at the first parent who tried to register rather than at the
-   migration. There is a spec for this now.
-2. **The seed hung forever.** It opened its own database client while the
-   importer used the shared one, so `end()` closed the wrong pool. Cost a ten
-   minute test run to find.
-3. **The import cried wolf.** It compared sessions currently running against
-   their published count, so the moment the office cancelled an afternoon it
-   reported three schedules as broken. An alert that fires on correct behaviour
-   is one people learn to ignore.
-4. **A parent could claim another family's photograph.** Storage enforced the
-   folder on the way in; nothing enforced it on the way back.
-5. **An imported link could be `javascript:`.** `new URL` accepts it happily,
-   and these strings end up in an href a parent clicks.
-6. **The concurrency proof was proving nothing.** It ran against whatever class
-   had the most room, which was sometimes emptier than the number of parents.
-7. **A client component dragged the Postgres driver into the browser bundle.**
-   The same shape as the earlier Stripe formatter incident.
-8. **postgres.js returns a `Date` for a `date` column**, so `String(d).slice(0, 10)`
-   produced "Tue Aug 25" and took the page down with a RangeError.
-9. **The command palette was two pixels tall.** The topbar has a
-   `backdrop-filter`, and any element with one becomes the containing block for
-   `position: fixed` inside it.
+1. **"Move next class" had never worked.** The catalogue migration made
+   `sessions.session_date` NOT NULL; the reschedule insert never set it, so
+   every move threw. It shipped because the only session test clicked *Cancel*
+   next class. This is the best single argument for testing the boring path.
+2. **A moved session undid itself.** The replacement row was `origin =
+   'generated'`, so the next schedule regeneration deleted it. The move
+   appeared to work and then quietly reverted.
+3. **Two staff cancelling the same date both won.** Read the status, decide,
+   then write: the same read-then-write shape `take_seat` exists to avoid. Fixed
+   with `select ... for update`, which is what `schedule-check.ts` proves.
+4. **Two moves onto the same date crashed the transaction.** Row locks cannot
+   help when two people lock different rows. Only the unique index catches it,
+   and a constraint violation poisons a Postgres transaction, so it needed a
+   savepoint to become an answer instead of a 500.
+5. **A bulk shift grew the term.** Shifting dates in place leaves a hole, and the
+   next regeneration puts a fresh class on it. Vacated dates are now recorded as
+   closures.
+6. **`optionalText` was not optional.** It required the key to be present in
+   FormData, so any form that did not render an optional field failed with
+   "expected string, received undefined". Found by clicking a button with no
+   note box on it. `optionalUrl` had the same hole.
+7. **The cancel endpoint validated before checking the session**, so an
+   anonymous caller got a 400 describing the schema instead of a 401. Caught by
+   an existing auth test.
+8. **The school combobox never opened on click.** With `autoFocus` the field
+   already holds focus, so clicking it fires no focus event. The register page's
+   picker looked broken to anybody who clicked before typing.
+9. **A `loading.tsx` turned a 404 into a 200.** Placed at `register/`, it wrapped
+   `register/[id]` in a Suspense boundary; once a response streams its status is
+   already sent, so `notFound()` degraded to a soft 404. The landing skeletons
+   now live in route groups so they cannot cover an id route.
+10. **The seed left the audit trail behind.** Session ids survive a reseed
+    because `generate_sessions` upserts on `(class, date)`, so yesterday's
+    `session_events` attached themselves to today's sessions. A test cancelled
+    three dates and found four cancellations.
+11. **`--color-sun-soft` was never declared**, so `bg-sun-soft` was silently
+    dropped and the special-notes panel on a class card had no background.
+12. **`.ops-label` was inline**, so every label sat beside its own field rather
+    than above it.
+13. **A dead image URL was stored as if it were good.** The Airtable links in
+    the committed snapshot expired during this build and every one answered 410.
+    A link we have just proved is broken is now stored as null, so the page
+    falls back to the initial-letter tile instead of rendering a broken image.
 
 ---
 

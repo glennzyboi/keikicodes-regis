@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { sql, unique, signInStaff, signUpParent, registerAndPay, freeClass } from "./helpers";
+import { PER_PAGE } from "../src/app/admin/ui";
 
 /**
  * Every console tab, exercised rather than merely loaded.
@@ -28,9 +29,28 @@ test.describe("overview", () => {
       page.getByText(new RegExp(`${truth.enrolled} of ${truth.capacity} seats filled`)),
     ).toBeVisible();
 
-    // One row per published class in the capacity table.
-    const rows = page.locator("table.ops-table tbody tr");
-    await expect(rows).toHaveCount(truth.classes);
+    // The capacity table pages at ten now, so it shows a page rather than every
+    // class. What has to stay true is that the totals above it come from the
+    // whole database and not from the rows on screen: summing the rendered
+    // array is precisely the bug this replaced, and it made "Collected" on the
+    // Money page wrong past its two hundredth order.
+    const rows = page.locator("#capacity table.ops-table tbody tr");
+    await expect(rows).toHaveCount(Math.min(truth.classes, PER_PAGE));
+    await expect(page.locator("#capacity .ops-pager")).toContainText(`of ${truth.classes}`);
+
+    // And the first page holds anything that does not reconcile, because a
+    // dashboard should lead with what needs doing.
+    const [drift] = await sql<{ n: number }[]>`
+      select count(*)::int as n from class_offerings c
+       where c.status = 'published'
+         and (select count(*)::int from enrollments e
+               where e.class_offering_id = c.id
+                 and e.status in ('active','cancellation_requested'))
+           + (select count(*)::int from seat_holds h where h.class_offering_id = c.id)
+           <> c.seats_taken`;
+    if (drift.n > 0 && drift.n <= PER_PAGE) {
+      await expect(page.locator("#capacity").getByText("drift").first()).toBeVisible();
+    }
 
     // The chart rendered as real SVG with real coordinates, not an empty box.
     // Asserted by attribute rather than visibility: a week with the same count
@@ -141,7 +161,7 @@ test.describe("families and students", () => {
 
     // A term that matches nothing says so rather than showing everyone.
     await page.goto("/admin/families?q=zzzznotarealfamilyzzzz");
-    await expect(page.getByText("Nobody matches that")).toBeVisible();
+    await expect(page.getByText("Nobody matches")).toBeVisible();
   });
 
   test("the family page shows keiki, registrations, payments and messages", async ({
@@ -237,24 +257,36 @@ test.describe("classes", () => {
 
     test.skip(!cls, "no class with anyone in it");
 
+    // The roster, the calendar and the money are tabs on the class now rather
+    // than three sections stacked down one very long page. The header that says
+    // which class you are looking at is on every one of them, which is the part
+    // worth asserting: several campuses run classes with identical titles.
     await page.goto(`/admin/classes/${cls.id}`);
     await expect(page.getByRole("heading", { name: cls.title })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Roster" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Schedule" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Payments for this class/ })).toBeVisible();
+
+    for (const [tab, heading] of [
+      ["roster", "Roster"],
+      ["schedule", "Schedule"],
+      ["money", "Orders"],
+    ] as const) {
+      await page.goto(`/admin/classes/${cls.id}/${tab}`);
+      await expect(page.getByRole("heading", { name: cls.title }), tab).toBeVisible();
+      await expect(page.getByRole("heading", { name: heading }), tab).toBeVisible();
+    }
 
     // Enrolled plus held equals seats taken, and the page says so.
     expect(cls.enrolled + cls.held).toBe(cls.seats_taken);
+    await page.goto(`/admin/classes/${cls.id}`);
     await expect(page.getByText("does not reconcile")).toHaveCount(0);
 
-    // Ten session rows for a ten week class.
     const [{ n }] = await sql<{ n: number }[]>`
       select count(*)::int as n from sessions where class_offering_id = ${cls.id}`;
-    await expect(page.locator("table.ops-table tbody tr")).toHaveCount(
-      // roster rows + session rows + payment rows, so just assert sessions exist
-      await page.locator("table.ops-table tbody tr").count(),
-    );
     expect(n).toBeGreaterThan(0);
+
+    // Every session is on the schedule tab, which is the one that has to hold
+    // all of them rather than the first page of them.
+    await page.goto(`/admin/classes/${cls.id}/schedule`);
+    await expect(page.locator("table.ops-table tbody tr")).toHaveCount(n);
   });
 
   test("cancelling a session marks it and emails everyone enrolled", async ({ page }) => {
@@ -281,17 +313,40 @@ test.describe("classes", () => {
     const before = await sql<{ n: number }[]>`
       select count(*)::int as n from notifications where template = 'session_cancelled'`;
 
-    await page.goto(`/admin/classes/${target.class_id}`);
-    await page.getByRole("button", { name: "Cancel next class" }).click();
-    await page.getByPlaceholder("Instructor out sick").fill("Automated test, holiday closure.");
-    await page.getByRole("button", { name: "Cancel this date" }).click();
-    await page.waitForTimeout(2500);
+    await page.goto(`/admin/classes/${target.class_id}/schedule`);
+
+    // Tick that exact date. The unit of work is a selection now, not a button
+    // that acts on whatever happens to be next, so the row has to be addressed
+    // by id: "the first checkbox on the page" is week one, which has already
+    // happened, and the test would cancel the wrong afternoon and then assert
+    // about a session nobody touched.
+    await page.locator(`tr[data-session="${target.session_id}"] input[type=checkbox]`).check();
+    await page.getByRole("button", { name: /^Cancel (it|them)$/ }).click();
+
+    // A reason is required, from a fixed list, so the office can count them.
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("select[name=reasonCode]").selectOption("holiday");
+    await dialog.locator("textarea[name=note]").fill("Automated test, holiday closure.");
+    await page.getByRole("button", { name: "Cancel these dates" }).click();
+    await expect(page.locator(".ops-note-good")).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(1500);
 
     // The session really is cancelled.
-    const [session] = await sql<{ status: string; note: string }[]>`
-      select status, note from sessions where id = ${target.session_id}`;
+    const [session] = await sql<
+      { status: string; note: string; cancel_reason_code: string }[]
+    >`select status, note, cancel_reason_code from sessions where id = ${target.session_id}`;
     expect(session.status).toBe("cancelled");
     expect(session.note).toBe("Automated test, holiday closure.");
+    expect(session.cancel_reason_code, "the reason is recorded, not just the note").toBe(
+      "holiday",
+    );
+
+    // And who did it, which nothing recorded before.
+    const [event] = await sql<{ event: string; actor: string }[]>`
+      select e.event, st.full_name as actor
+        from session_events e join staff st on st.id = e.actor_id
+       where e.session_id = ${target.session_id} and e.event = 'cancelled'`;
+    expect(event?.actor).toBeTruthy();
 
     // And one notice per enrolled family was queued in the same transaction.
     const after = await sql<{ n: number }[]>`
@@ -327,7 +382,7 @@ test.describe("classes", () => {
     const [originBefore] = await sql<{ seats_taken: number }[]>`
       select seats_taken from class_offerings where id = ${enrollment.class_offering_id}`;
 
-    await page.goto(`/admin/classes/${enrollment.class_offering_id}`);
+    await page.goto(`/admin/classes/${enrollment.class_offering_id}/roster`);
 
     // Scope everything to this child's row. Every row has its own Move button
     // and its own form, so an unscoped locator can open one row and submit
@@ -362,7 +417,7 @@ test.describe("classes", () => {
        where enrollment_id = ${enrollment.id} and event = 'transferred'
        order by created_at desc limit 1`;
     expect(event, "a transfer is audited").toBeTruthy();
-    expect(event.payload.by).toBe("ops@keikicoders.test");
+    expect(event.payload.by).toBe("ops@keikicoders.com");
   });
 });
 
@@ -504,7 +559,7 @@ test.describe("outbox", () => {
         select count(*)::int as n from notifications where status = ${status}`;
 
       if (n === 0) {
-        await expect(page.getByText("No messages in that state.")).toBeVisible();
+        await expect(page.getByText("No message matches those filters")).toBeVisible();
       } else {
         await expect(page.locator("table.ops-table tbody tr")).toHaveCount(Math.min(n, 200));
       }
@@ -544,7 +599,12 @@ test.describe("seat holds", () => {
               on conflict (order_item_id) do nothing`;
 
     await page.goto("/admin/holds");
-    await expect(page.getByText("protected").first()).toBeVisible();
+
+    // The pill on the row, not "protected" anywhere on the page. The loose
+    // version of this matched the *option* inside the new State filter, which
+    // is hidden while the select is closed, so the assertion failed on a page
+    // that was in fact completely correct.
+    await expect(page.locator(".ops-table .ops-pill", { hasText: /^protected$/ })).toHaveCount(1);
     await expect(page.getByText(/belong to a paid order/)).toBeVisible();
 
     await sql`delete from seat_holds where order_item_id = ${item.id}`;

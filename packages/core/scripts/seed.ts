@@ -41,12 +41,15 @@ const admin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } },
 );
 
-const STAFF_EMAIL = "ops@keikicoders.test";
+import { seedFamilies } from "../src/demo-families";
+import { seedScenarios } from "../src/demo-scenarios";
+
+const STAFF_EMAIL = "ops@keikicoders.com";
 const STAFF_PASSWORD = "KeikiOps!2026";
 
 /** A parent account to sign in as, so the flow can be shown without signing up
  *  first every time the database is reset. */
-const DEMO_PARENT_EMAIL = "parent@keikicoders.test";
+const DEMO_PARENT_EMAIL = "malia.kealoha@gmail.com";
 const DEMO_PARENT_PASSWORD = "KeikiParent!2026";
 const DEMO_PARENT_NAME = "Malia Kealoha";
 
@@ -89,8 +92,8 @@ async function main() {
 
   // Families, money and seats go. The catalogue stays and is updated in place.
   console.log("Clearing families, orders and seats...");
-  await sql`truncate table enrollment_events, webhook_events, seat_holds, enrollments,
-            order_items, orders, consents, guardians, children, parents,
+  await sql`truncate table enrollment_events, session_events, webhook_events, seat_holds,
+            enrollments, order_items, orders, consents, guardians, children, parents,
             notifications, support_notes
             restart identity cascade`;
   await sql`update class_offerings set seats_taken = 0`;
@@ -102,8 +105,22 @@ async function main() {
   // different session counts and nobody can tell why.
   await sql`delete from sessions where origin = 'manual'`;
   await sql`update sessions set status = 'scheduled', note = null,
-                                from_blackout = false, rescheduled_from = null
-             where status <> 'scheduled' or note is not null`;
+                                from_blackout = false, rescheduled_from = null,
+                                cancel_reason_code = null,
+                                changed_at = null, changed_by = null
+             where status <> 'scheduled' or note is not null
+                or cancel_reason_code is not null or changed_by is not null`;
+
+  // The audit trail goes with them, and it is in the truncate above. Session
+  // ids survive a reseed, because generate_sessions upserts on (class, date)
+  // rather than recreating rows, so an audit row written by yesterday's run
+  // attaches itself to today's session and the counts stop adding up. Found by
+  // a test that cancelled three dates and found four cancellations.
+  //
+  // Blackouts created by a hand shift are cleared for the same reason: they are
+  // a record of an edit, not part of the imported catalogue.
+  await sql`delete from offering_blackouts
+             where reason in ('Moved to a later date', 'Moved to an earlier date')`;
 
   console.log("Importing their catalogue...");
   const source = await chooseSource(!useSnapshot);
@@ -198,6 +215,11 @@ async function main() {
   const staffAuthId = await ensureAuthUser(STAFF_EMAIL, STAFF_PASSWORD, {
     full_name: "Keiki Ops",
   });
+  // Any staff row from an older demo email. The insert below is keyed on
+  // auth_user_id, so a renamed account leaves the old row behind and the console
+  // then lists two people who are the same person.
+  await sql`delete from staff where email <> ${STAFF_EMAIL}`;
+
   await sql`insert into staff (auth_user_id, email, full_name)
             values (${staffAuthId}, ${STAFF_EMAIL}, 'Keiki Ops')
             on conflict (auth_user_id) do nothing`;
@@ -213,6 +235,34 @@ async function main() {
               set auth_user_id = excluded.auth_user_id,
                   full_name = excluded.full_name`;
 
+  // A believable set of families, unless the caller only wants the catalogue.
+  //
+  // Off for the test suite, which reseeds before every run and needs a known,
+  // empty starting point: forty families holding seats would change every
+  // "seats free" assertion in the suite. On by default, because a console with
+  // one parent in it is impossible to judge.
+  let families = { parents: 0, children: 0, enrolled: 0, paid: 0 };
+  let scenarios: Record<string, string> = {};
+  if (!process.argv.includes("--no-families")) {
+    console.log("Adding demo families...");
+    const classes = await sql<
+      { id: string; price_cents: number; capacity: number; seats_taken: number }[]
+    >`select id, price_cents, capacity, seats_taken
+         from class_offerings
+        where status = 'published' and registration_mode = 'keiki_coders'
+        order by id`;
+    families = await seedFamilies(sql, {
+      classes,
+      allowRemote: process.argv.includes("--allow-remote-demo-data"),
+    });
+
+    // The states worth demonstrating, put there on purpose: a child in two
+    // classes, a mid term joiner, a drop, a cancellation waiting on a decision,
+    // a holiday and a moved session, and a class one seat from full. Without
+    // these a demo is a description of features rather than a tour of them.
+    scenarios = await seedScenarios(sql);
+  }
+
   const [counts] = await sql<
     { schools: number; programs: number; offerings: number; sellable: number; sessions: number }[]
   >`select (select count(*) from schools)::int                              as schools,
@@ -227,6 +277,18 @@ async function main() {
     `  ${counts.schools} schools, ${counts.programs} programs, ${counts.offerings} offerings ` +
       `(${counts.sellable} sold here), ${counts.sessions} sessions.`,
   );
+  if (families.parents > 0) {
+    console.log(
+      `  ${families.parents} families, ${families.children} keiki, ` +
+        `${families.enrolled} enrolled, ${families.paid} paid orders.`,
+    );
+  }
+  const names = Object.keys(scenarios);
+  if (names.length > 0) {
+    console.log("\n  Ready to demonstrate:");
+    for (const n of names) console.log(`    ${n}\n      ${scenarios[n]}`);
+  }
+  console.log("");
   console.log(`  Staff:  ${STAFF_EMAIL} / ${STAFF_PASSWORD}`);
   console.log(`  Parent: ${DEMO_PARENT_EMAIL} / ${DEMO_PARENT_PASSWORD}`);
   await sql.end();

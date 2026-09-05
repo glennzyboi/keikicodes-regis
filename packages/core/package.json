@@ -15,7 +15,8 @@
     "notify": "tsx --env-file=../../apps/web/.env.local scripts/jobs.ts notify",
     "reminders": "tsx --env-file=../../apps/web/.env.local scripts/jobs.ts reminders",
     "sweep": "tsx --env-file=../../apps/web/.env.local scripts/jobs.ts sweep",
-    "verify:api": "tsx scripts/verify-api-parity.ts"
+    "verify:api": "tsx scripts/verify-api-parity.ts",
+    "check:schedule": "tsx --env-file=../../apps/web/.env.local scripts/schedule-check.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

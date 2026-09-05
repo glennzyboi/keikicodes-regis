@@ -40,7 +40,7 @@ export default async function RegisterPage({ params }: { params: Promise<{ id: s
           <h1 className="mt-2 font-display text-3xl font-bold text-green-900">{cls.title}</h1>
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink-soft">
             {cls.school} takes registrations for this class through their own office. We
-            teach it; they enrol for it, so signing up here would not get your child a
+            teach it; they enroll for it, so signing up here would not get your child a
             place.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
@@ -129,7 +129,7 @@ export default async function RegisterPage({ params }: { params: Promise<{ id: s
      order by clashes asc, c.weekday limit 6`;
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-12">
+    <div className="mx-auto max-w-6xl px-5 py-12">
       <Link href={`/schools/${cls.schoolSlug}`} className="kc-back">
         <span aria-hidden>&larr;</span> {cls.school}
       </Link>

@@ -438,8 +438,8 @@ test.describe("a family cannot reach another family's things", () => {
       return (body.access_token as string) ?? (await token(owner, "TestParent!2026"));
     })();
 
-    const otherToken = await token("parent@keikicoders.test", "KeikiParent!2026");
-    const staffToken = await token("ops@keikicoders.test", "KeikiOps!2026");
+    const otherToken = await token("malia.kealoha@gmail.com", "KeikiParent!2026");
+    const staffToken = await token("ops@keikicoders.com", "KeikiOps!2026");
 
     const read = async (bearer?: string) => {
       const res = await request.get(`${url}/storage/v1/object/child-photos/${key}`, {

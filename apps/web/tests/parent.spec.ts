@@ -6,8 +6,8 @@ import {
   signInParent,
   signInStaff,
   registerAndPay,
-  fillDate,
   fillRegistration,
+  payWithTestCard,
   agreeToPolicies,
   freeClass,
   externalClass,
@@ -38,7 +38,7 @@ test.describe("accounts", () => {
     await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
 
     // Session really is gone.
-    await page.goto("/portal");
+    await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
 
     await signInParent(page, email);
@@ -79,25 +79,26 @@ test.describe("accounts", () => {
 });
 
 test.describe("browsing and registering", () => {
-  test("a class card opens to its full detail", async ({ page }) => {
-    // A class with room, so the detail carries a register link rather than the
+  test("a card carries the decision, and the detail has its own page", async ({ page }) => {
+    // A class with room, so the page carries a register link rather than the
     // disabled state a full class shows.
     const open = await freeClass(1);
-    // Cards live on the campus page now. The front door asks which school
-    // first, because that is the only thing a parent arrives knowing.
     await page.goto(`/schools/${open.school_slug}`);
 
-    const card = page.locator(".exp-card", { hasText: open.title }).first();
-    const summary = card.locator(".exp-card-summary");
-    await expect(summary).toHaveAttribute("aria-expanded", "false");
+    // The card used to be a disclosure that expanded in place, which made the
+    // grid ragged and reflowed everything below whenever anybody opened one.
+    // Now the summary is what you decide on and the detail is a page, because a
+    // class is a thing parents send each other and a modal has no address.
+    const card = page.locator(".kc-tile-shell", { hasText: open.title }).first();
+    await expect(card.getByRole("link", { name: "Register", exact: true })).toBeVisible();
 
-    await summary.click();
-    await expect(summary).toHaveAttribute("aria-expanded", "true");
+    await card.locator("a.kc-tile-title").click();
+    await expect(page).toHaveURL(/\/programs\//);
 
-    // The detail carries what the summary does not.
-    await expect(card.getByText("Runs")).toBeVisible();
-    await expect(card.getByText("Class size")).toBeVisible();
-    await expect(card.getByRole("link", { name: /Register for/ })).toBeVisible();
+    // The detail carries what the card does not.
+    await expect(page.getByText("Runs", { exact: true })).toBeVisible();
+    await expect(page.getByText("Class size", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Register for this class/ })).toBeVisible();
   });
 
   test("the seat counts on the page match the database", async ({ page }) => {
@@ -123,14 +124,10 @@ test.describe("browsing and registering", () => {
 
     for (const c of classes) {
       const left = c.capacity - c.seats_taken;
-      const card = page.locator(".exp-card", { hasText: c.title }).first();
-      const expected =
-        left <= 0 ? "Class is full" : left === 1 ? "1 seat left" : `${left} seats left`;
-      // A full class says it twice, on the badge and on the disabled button.
-      await expect(
-        card.getByText(expected).first(),
-        `${c.title} seat count`,
-      ).toBeVisible();
+      const card = page.locator(".kc-tile-shell", { hasText: c.title }).first();
+      const expected = left <= 0 ? "Full" : left === 1 ? "1 seat left" : `${left} seats left`;
+      await expect(card.getByText(expected, { exact: true }).first(), `${c.title} seat count`)
+        .toBeVisible();
     }
   });
 
@@ -138,13 +135,18 @@ test.describe("browsing and registering", () => {
     const ext = await externalClass();
     await page.goto(`/schools/${ext.school_slug}`);
 
-    const card = page.locator(".exp-card", { hasText: ext.title }).first();
-    await card.locator(".exp-card-summary").click();
+    const card = page.locator(".kc-tile-shell", { hasText: ext.title }).first();
 
     // No Register button anywhere on it, and a link to the school instead.
-    await expect(card.getByRole("link", { name: /^Register for/ })).toHaveCount(0);
-    await expect(card.getByText("Enrolled through the school")).toBeVisible();
-    await expect(card.getByRole("link", { name: new RegExp(`Register at`) })).toBeVisible();
+    await expect(card.getByRole("link", { name: "Register", exact: true })).toHaveCount(0);
+    await expect(card.getByText(`Enrolled through ${ext.school}`)).toBeVisible();
+    await expect(card.getByRole("link", { name: "Go to the school" })).toBeVisible();
+
+    // The class page says the same thing, since that is the address somebody
+    // is most likely to be sent.
+    await card.locator("a.kc-tile-title").click();
+    await expect(page.getByRole("link", { name: /Register for this class/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: new RegExp("Register at") })).toBeVisible();
 
     // And walking straight to the registration URL says so rather than 404ing
     // or, worse, taking a payment.
@@ -162,9 +164,6 @@ test.describe("browsing and registering", () => {
     // skip, which meant the feature went unproven every single run while the
     // suite reported green.
     const base = await freeClass(1);
-    const [ctx] = await sql<{ school_id: string; program_id: string; term_id: string }[]>`
-      select school_id, program_id, term_id from class_offerings where id = ${base.id}`;
-
     const clashTitle = unique("Overlapping").replace(/-/g, " ");
     const [other] = await sql<{ id: string }[]>`
       insert into class_offerings
@@ -201,31 +200,68 @@ test.describe("browsing and registering", () => {
     await sql`delete from class_offerings where id = ${other.id}`;
   });
 
-  test("the date field keeps partial input and clamps impossible days", async ({ page }) => {
+  test("the date field types, advances, pastes and clamps", async ({ page }) => {
     await signUpParent(page, `${unique("dates")}@example.test`);
     const cls = await freeClass(1);
     await page.goto(`/register/${cls.id}`);
 
-    const parts = page.locator(".df-parts").first().locator("select");
+    const parts = page.locator(".df-parts").first();
+    const day = parts.locator(".df-d");
+    const month = parts.locator(".df-m");
+    const year = parts.locator(".df-y");
 
-    // Month alone survives, which was a real bug: publishing an empty ISO value
-    // used to feed back and blank the select that had just been set.
-    await parts.nth(0).selectOption("02");
-    await expect(parts.nth(0)).toHaveValue("02");
+    // Partial input survives. Publishing an empty ISO used to feed back and
+    // blank the box that had just been filled.
+    await day.fill("30");
+    await expect(day).toHaveValue("30");
 
-    await parts.nth(1).selectOption("30");
-    await expect(parts.nth(1)).toHaveValue("30");
-    await expect(parts.nth(0)).toHaveValue("02");
+    // Two digits move you on without a click, which is the whole point of
+    // typing over choosing.
+    await day.focus();
+    await day.press("Backspace");
+    await day.press("Backspace");
+    await day.pressSequentially("07");
+    await expect(month).toBeFocused();
 
-    // Choosing a non leap year clamps 30 February down to a day that exists.
-    await parts.nth(2).selectOption("2015");
-    await expect(parts.nth(2)).toHaveValue("2015");
-    const day = await parts.nth(1).inputValue();
-    expect(Number(day), "February cannot have 30 days").toBeLessThanOrEqual(28);
+    // A single digit that cannot be the start of anything else also moves on:
+    // there is no month starting with 4.
+    await month.pressSequentially("4");
+    await expect(year).toBeFocused();
+
+    // Backspace at the start of a box steps back to the previous one.
+    await year.press("Backspace");
+    await expect(month).toBeFocused();
+
+    // February cannot have 30 days, and the clamp happens once both are known.
+    await day.fill("30");
+    await month.fill("02");
+    await year.fill("2015");
+    expect(
+      Number(await day.inputValue()),
+      "February cannot have 30 days",
+    ).toBeLessThanOrEqual(28);
+
+    // People paste dates. All three boxes fill from one.
+    await day.fill("");
+    await month.fill("");
+    await year.fill("");
+    await day.focus();
+    await page.evaluate(() => {
+      const el = document.querySelector(".df-parts .df-d") as HTMLInputElement;
+      const data = new DataTransfer();
+      data.setData("text", "05/05/2016");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
+    });
+    await expect(day).toHaveValue("05");
+    await expect(month).toHaveValue("05");
+    await expect(year).toHaveValue("2016");
+
+    // And it says back what it understood, so a mistyped birthday is visible.
+    await expect(parts.locator("xpath=following-sibling::*").first()).toContainText("5 May 2016");
   });
 });
 
-test.describe("the portal", () => {
+test.describe("the parent dashboard", () => {
   test("calendar and details views, and a filter per child", async ({ page }) => {
     const email = `${unique("portal")}@example.test`;
     await signUpParent(page, email, "Portal Family");
@@ -241,20 +277,16 @@ test.describe("the portal", () => {
     await agreeToPolicies(page);
 
     await page.getByRole("button", { name: "Continue to payment" }).click();
-    await page.waitForURL(/checkout\.stripe\.com/, { timeout: 45_000 });
-    await page.getByRole("radio", { name: "Card" }).check({ force: true });
-    await page.getByPlaceholder("1234 1234 1234 1234").fill("4242424242424242");
-    await page.getByPlaceholder("MM / YY").fill("12/30");
-    await page.getByPlaceholder("CVC").fill("123");
-    const name = page.getByPlaceholder("Full name on card");
-    if (await name.isVisible().catch(() => false)) await name.fill("Portal Family");
-    await page.getByTestId("hosted-payment-submit-button").click();
+    // Was a third hand-written copy of the card driver. There is one now, in
+    // helpers, which is why moving checkout into an iframe was a single edit
+    // rather than three that had to be kept in step.
+    await payWithTestCard(page);
     await page.waitForURL(/\/confirming/, { timeout: 45_000 });
     await expect(page.getByRole("heading", { name: /your keiki are/i })).toBeVisible({
       timeout: 45_000,
     });
 
-    await page.goto("/portal");
+    await page.goto("/dashboard");
 
     // Calendar is the default and it has real events.
     await expect(page.getByRole("button", { name: "Calendar" })).toHaveAttribute(
@@ -276,7 +308,7 @@ test.describe("the portal", () => {
     expect(await page.locator(".cal-event").count()).toBe(allEvents);
 
     // Details view lists both registrations and expands.
-    await page.getByRole("button", { name: "Details" }).click();
+    await page.getByRole("button", { name: "My classes" }).click();
     await expect(page.locator(".exp-card")).toHaveCount(2);
 
     const first = page.locator(".exp-card-summary").first();
@@ -299,10 +331,17 @@ test.describe("the portal", () => {
     const [before] = await sql<{ seats_taken: number }[]>`
       select seats_taken from class_offerings where id = ${classId}`;
 
-    await page.goto("/portal");
-    await page.getByRole("button", { name: "Details" }).click();
+    await page.goto("/dashboard");
+    await page.getByRole("button", { name: "My classes" }).click();
     await page.locator(".exp-card-summary").first().click();
     await page.getByRole("button", { name: "Request cancellation" }).first().click();
+
+    // The dialog refuses to send without a reason, which is the point of it.
+    await page.getByRole("button", { name: "Send request" }).click();
+    await expect(page.locator(".mdl-panel [role=alert]")).toContainText("choose a reason");
+
+    await page.locator(".mdl-panel select").selectOption("schedule_conflict");
+    await page.locator(".mdl-panel textarea").fill("Swim training moved to Tuesdays.");
     await page.getByRole("button", { name: "Send request" }).click();
     await page.waitForTimeout(2000);
 
@@ -314,6 +353,16 @@ test.describe("the portal", () => {
     expect(enrollment.status).toBe("cancellation_requested");
     expect(enrollment.refund_owed).toBe(true);
 
+    // The reason is the new part, and it has to be countable, not free text.
+    const [why] = await sql<
+      { cancellation_reason_code: string; cancellation_note: string }[]
+    >`select e.cancellation_reason_code, e.cancellation_note from enrollments e
+        join children ch on ch.id = e.child_id
+        join parents p on p.id = ch.parent_id
+       where p.email = ${email}`;
+    expect(why.cancellation_reason_code).toBe("schedule_conflict");
+    expect(why.cancellation_note).toContain("Swim training");
+
     // The seat is still theirs. That is the whole point of a request.
     const [after] = await sql<{ seats_taken: number }[]>`
       select seats_taken from class_offerings where id = ${classId}`;
@@ -321,7 +370,7 @@ test.describe("the portal", () => {
 
     // And the portal says so rather than pretending it is done.
     await page.reload();
-    await page.getByRole("button", { name: "Details" }).click();
+    await page.getByRole("button", { name: "My classes" }).click();
     await expect(page.getByText("Cancellation requested").first()).toBeVisible();
   });
 });
@@ -353,10 +402,11 @@ test.describe("the full money lifecycle", () => {
     expect(confirmations.length, "one confirmation").toBe(1);
 
     // 3. Parent asks to cancel.
-    await page.goto("/portal");
-    await page.getByRole("button", { name: "Details" }).click();
+    await page.goto("/dashboard");
+    await page.getByRole("button", { name: "My classes" }).click();
     await page.locator(".exp-card-summary").first().click();
     await page.getByRole("button", { name: "Request cancellation" }).first().click();
+    await page.locator(".mdl-panel select").selectOption("cost");
     await page.getByRole("button", { name: "Send request" }).click();
     await page.waitForTimeout(2000);
 

@@ -4,6 +4,7 @@
 @import "../components/calendar.css";
 @import "../components/expandable.css";
 @import "../components/date-field.css";
+@import "../components/modal.css";
 
 /*
   Keiki Coders brand, taken from their live site rather than invented.
@@ -24,6 +25,10 @@
   --color-green-200: #cfe3da;
   --color-sun: #ffcf33;
   --color-sun-deep: #e6b800;
+  /* Used by bg-sun-soft in class-card.tsx and the form error notes. It was
+     never declared, so Tailwind dropped the class and the "special notes"
+     panel on a class card had no background at all. */
+  --color-sun-soft: #fff6d6;
   --color-paper: #ffffff;
   --color-mist: #f8f9fa;
   --color-hairline: #ebedee;
@@ -48,6 +53,25 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   color-scheme: light;
+
+  /* The shared dialog, in Keiki clothes. On :root rather than on .kc-site
+     because the dialog is portalled onto the body and lands outside both
+     wrappers; the console overrides these on .mdl-ops. */
+  --mdl-surface: #ffffff;
+  --mdl-text: var(--color-ink);
+  --mdl-muted: var(--color-ink-soft);
+  --mdl-line: var(--color-hairline);
+  --mdl-hover: var(--color-green-100);
+  --mdl-accent: var(--color-green-500);
+  --mdl-scrim: rgb(6 35 28 / 0.42);
+  --mdl-ease: var(--ease-out);
+  --mdl-radius: 20px;
+  --mdl-pad: 18px 20px;
+  --mdl-body-pad: 20px;
+  --mdl-title-size: 19px;
+  --mdl-title-color: var(--color-green-900);
+  --mdl-font: 500 15px/1.6 var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --mdl-title-font: var(--font-fredoka), ui-rounded, system-ui, sans-serif;
 }
 
 html {
@@ -327,6 +351,25 @@ h1, h2, h3, h4, .font-display {
   font-family: var(--font-display);
   font-weight: 600;
 }
+/* Nearly gone. Colour is never the only signal: the chip says the number too,
+   so this is emphasis on a fact that is already written out. */
+.kc-chip-warn {
+  background: color-mix(in oklab, var(--color-sun) 22%, white);
+  border-color: var(--color-sun-deep);
+  color: #7a3d00;
+  font-weight: 600;
+}
+
+/* The same mark, at the size a detail page wants. */
+.kc-program-mark-lg {
+  width: 66px;
+  height: 66px;
+  border-radius: 20px;
+}
+.kc-program-mark-lg svg {
+  width: 34px;
+  height: 34px;
+}
 
 /* Seats remaining, as a bar rather than only a sentence. */
 .kc-seats {
@@ -436,6 +479,54 @@ h1, h2, h3, h4, .font-display {
   outline: none;
   border-color: var(--color-green-500);
   box-shadow: 0 0 0 4px rgb(46 158 116 / 0.14);
+}
+
+/*
+  A field that has been told it is wrong.
+
+  Driven by aria-invalid rather than a class, so the thing a screen reader
+  announces and the thing a sighted parent sees can never disagree: there is
+  one attribute and it does both. Colour is never the only signal either, the
+  message sits next to the field and is announced.
+*/
+.kc-fieldset > input[aria-invalid="true"],
+.kc-fieldset > select[aria-invalid="true"],
+.kc-fieldset > textarea[aria-invalid="true"] {
+  border-color: var(--color-sun-deep);
+  background: color-mix(in oklab, var(--color-sun) 7%, white);
+}
+.kc-fieldset > input[aria-invalid="true"]:focus,
+.kc-fieldset > select[aria-invalid="true"]:focus,
+.kc-fieldset > textarea[aria-invalid="true"]:focus {
+  border-color: var(--color-sun-deep);
+  box-shadow: 0 0 0 4px rgb(230 184 0 / 0.18);
+}
+
+/* The message under a field. Small, but never smaller than the body text it
+   corrects, and never grey on grey. */
+.kc-field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: #9a4b00;
+}
+
+/* A summary at the top of a long form, listing every field that needs
+   attention, each one a link to it. On a fifteen field registration form
+   "something is wrong" without saying where is the same as no message. */
+.kc-error-summary {
+  border: 2px solid var(--color-sun-deep);
+  background: var(--color-sun-soft);
+  border-radius: var(--radius-field);
+  padding: 0.9rem 1.1rem;
+  color: var(--color-ink);
+}
+.kc-error-summary a {
+  color: #7a3d00;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ------------------------------------------------------------- campus tile */
@@ -588,4 +679,842 @@ h1, h2, h3, h4, .font-display {
 .kc-check > input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--color-green-500, #2e9e74);
   outline-offset: 2px;
+}
+
+/* ==================================================================== combo */
+/*
+  Pick your school, by typing.
+
+  A grid of nineteen tiles is a fine thing to look at once and a bad thing to
+  use twice. This is faster for the parent who knows the answer and still
+  browsable for the one who does not, because the whole list is there the
+  moment it opens.
+*/
+.kc-combo {
+  position: relative;
+  width: 100%;
+}
+.kc-combo-label {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+  margin-bottom: 0.4rem;
+}
+.kc-combo-shell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--color-paper);
+  border: 2px solid var(--color-hairline);
+  border-radius: var(--radius-field);
+  padding: 0 0.9rem;
+  transition: border-color 160ms ease, box-shadow 160ms var(--ease-out);
+}
+.kc-combo-shell:focus-within {
+  border-color: var(--color-green-500);
+  box-shadow: 0 0 0 4px rgb(46 158 116 / 0.14);
+}
+.kc-combo-icon {
+  color: var(--color-green-600);
+  flex: none;
+}
+.kc-combo-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0.85rem 0;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  color: var(--color-ink);
+}
+.kc-combo-clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+.kc-combo-clear:hover {
+  background: var(--color-green-100);
+}
+
+.kc-combo-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  max-height: min(60vh, 26rem);
+  overflow-y: auto;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lift);
+  padding: 0.35rem;
+
+  /* Never from scale(0). Short, because this opens on every keystroke's worth
+     of intent and anything longer reads as lag. */
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out);
+}
+@starting-style {
+  .kc-combo-list {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.kc-combo-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  cursor: pointer;
+}
+/* Colour only. This is a list somebody arrows through quickly, and a row that
+   moves under the cursor at that rate is noise. */
+.kc-combo-option[data-active="true"] {
+  background: var(--color-green-100);
+}
+.kc-combo-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--color-mist);
+  overflow: hidden;
+}
+.kc-combo-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.kc-combo-initial {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--color-green-700);
+}
+.kc-combo-name {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--color-green-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kc-combo-meta {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-ink-soft);
+}
+.kc-combo-seats {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-green-600);
+}
+.kc-combo-empty {
+  padding: 0.9rem 0.8rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+/* =================================================================== cards */
+/*
+  A program card, every one the same height.
+
+  The old card was an expanding disclosure, which meant the grid reflowed the
+  moment anybody opened one and the cards were all different heights to begin
+  with because the descriptions differ. Fixed rows and a clamped summary make a
+  grid you can scan; the detail lives on its own page, which is also the thing
+  you can send somebody a link to.
+*/
+.kc-tile {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .kc-tile:has(a:hover) {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kc-tile {
+    transition: none;
+  }
+  .kc-tile:has(a:hover) {
+    transform: none;
+  }
+}
+
+.kc-tile-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.15rem 1.25rem 0;
+}
+.kc-tile-body {
+  flex: 1;
+  padding: 0.85rem 1.25rem 1rem;
+}
+.kc-tile-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-green-900);
+  /* Two lines, always. Their titles run from "Tinker Lab" to "Code Heroes:
+     Virtual Reality (non A+ students)". */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 3rem;
+}
+.kc-tile-summary {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.8rem;
+}
+.kc-tile-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  min-height: 2rem;
+}
+.kc-tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1.25rem;
+  border-top: 1px solid var(--color-hairline);
+  background: color-mix(in oklab, var(--color-mist) 60%, white);
+}
+.kc-tile-price {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-green-900);
+  line-height: 1.1;
+}
+.kc-tile-price small {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-ink-soft);
+}
+.kc-tile-cta {
+  margin-left: auto;
+  flex: none;
+}
+/* The whole card is the link to the detail page, but the Register button on top
+   of it is its own target. Without the raised stacking context the overlay
+   would swallow it. */
+.kc-tile-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.kc-tile-shell {
+  position: relative;
+  height: 100%;
+}
+.kc-tile-cta,
+.kc-tile-badge {
+  position: relative;
+  z-index: 1;
+}
+
+/* ===================================================================== nav */
+/*
+  Top level navigation.
+
+  The active item is marked with a colour change and a rule under it, never
+  with movement. This bar is on every page and something that slides each time
+  you navigate becomes tiring by the fourth click.
+*/
+.kc-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.kc-nav-link {
+  position: relative;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-ink-soft);
+  transition: color 140ms ease, background-color 140ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .kc-nav-link:hover {
+    color: var(--color-green-900);
+    background: var(--color-green-100);
+  }
+}
+.kc-nav-link[data-active] {
+  color: var(--color-green-900);
+}
+.kc-nav-link[data-active]::after {
+  content: "";
+  position: absolute;
+  left: 0.85rem;
+  right: 0.85rem;
+  bottom: 0.2rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-sun);
+}
+.kc-nav-link:focus-visible {
+  outline: 3px solid var(--color-green-500);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .kc-nav-link {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.88rem;
+  }
+}
+
+/* =================================================================== stage */
+/*
+  The hero animation's box.
+
+  Sized here rather than by the player, so the poster and the film occupy
+  exactly the same space and nothing shifts when the player takes over. The
+  aspect ratio matches the composition (720x520) for the same reason.
+*/
+.kc-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 720 / 520;
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+  background: radial-gradient(120% 100% at 70% 0%, #f2f8f4 0%, #e6f1ea 45%, #dcece3 100%);
+  border: 1px solid var(--color-hairline);
+  box-shadow: var(--shadow-card);
+}
+
+/* The still. Deliberately the same scene at rest, so the page looks finished
+   before any JavaScript arrives and stays looking finished for anybody who
+   never gets it. */
+.kc-stage-poster {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2.5rem;
+}
+.kc-stage-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+}
+.kc-stage-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-green-900);
+  box-shadow: 0 10px 24px -14px rgb(6 35 28 / 0.3);
+  white-space: nowrap;
+}
+.kc-stage-step-n {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-green-900);
+  color: #fff;
+  font-size: 0.65rem;
+}
+
+/*
+  A number that counts.
+
+  Rendered from a CSS counter driven by an animated custom property, so the
+  interpolation happens off the main thread instead of in a React state update
+  per frame. The real value is also in the DOM as visually hidden text, which is
+  what a screen reader and a crawler read.
+*/
+@property --n {
+  syntax: "<integer>";
+  initial-value: 0;
+  inherits: false;
+}
+.kc-count::after {
+  content: counter(n);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The same invalid treatment for the .kc-field idiom the registration form
+   uses, so a field looks wrong the same way wherever it lives. */
+.kc-field[aria-invalid="true"] {
+  border-color: var(--color-sun-deep);
+  background: color-mix(in oklab, var(--color-sun) 7%, white);
+}
+.kc-field[aria-invalid="true"]:focus {
+  border-color: var(--color-sun-deep);
+  box-shadow: 0 0 0 4px rgb(230 184 0 / 0.18);
+}
+.kc-check input[aria-invalid="true"] {
+  outline: 2px solid var(--color-sun-deep);
+  outline-offset: 2px;
+}
+
+/* ================================================================ skeleton */
+/*
+  Shown while a page streams in. The shimmer animates background-position,
+  which stays off the main thread, and stops entirely for anybody who asked
+  for less motion.
+*/
+.kc-skel {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--color-hairline) 25%,
+    color-mix(in oklab, var(--color-hairline) 55%, white) 37%,
+    var(--color-hairline) 63%
+  );
+  background-size: 400% 100%;
+  animation: kc-shimmer 1.4s ease infinite;
+}
+@keyframes kc-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kc-skel {
+    animation: none;
+  }
+}
+
+/* ============================================================== child cards */
+/*
+  One card per child on the registration form.
+
+  These used to be three inline utilities with `bg-green-100`, which is #eef3f0
+  against a white card: about a 2% luminance difference, so the cards read as
+  flat white and the grouping between two children was invisible. A registration
+  for two keiki looked like one long form.
+*/
+.kc-child-card {
+  border: 1px solid var(--color-green-200);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--color-green-100) 55%, white);
+  padding: 1.25rem;
+}
+.kc-child-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--color-green-200);
+}
+.kc-child-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--color-green-700);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+/* Their name once they have one. A card headed "Kaimana" is easier to scan
+   than three headed "Child 1", "Child 2", "Child 3". */
+.kc-child-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-green-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kc-child-remove {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.kc-child-remove:hover {
+  color: var(--color-ink);
+}
+
+/* --------------------------------------------------------- add another child */
+.kc-add-child {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  text-align: left;
+  padding: 1rem 1.25rem;
+  border: 2px dashed var(--color-green-200);
+  border-radius: var(--radius-card);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease,
+    transform 160ms var(--ease-out);
+}
+.kc-add-child:active {
+  transform: scale(0.995);
+}
+@media (hover: hover) and (pointer: fine) {
+  .kc-add-child:hover {
+    border-color: var(--color-green-500);
+    background: color-mix(in oklab, var(--color-green-100) 60%, white);
+  }
+}
+.kc-add-child:focus-visible {
+  outline: 3px solid var(--color-green-500);
+  outline-offset: 2px;
+}
+.kc-add-child-plus {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--color-green-100);
+  color: var(--color-green-700);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.kc-add-child-title {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--color-green-900);
+}
+.kc-add-child-note {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.82rem;
+  color: var(--color-ink-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-add-child {
+    transition: none;
+  }
+  .kc-add-child:active {
+    transform: none;
+  }
+}
+
+/* =====================================================================
+   EMBEDDED CHECKOUT
+
+   Stripe's iframe, framed as part of our page rather than dropped into it.
+   The card fields are Stripe's and are styled by Stripe; everything around
+   them is ours, so the seam is a panel edge rather than a change of website.
+   ===================================================================== */
+.kc-checkout {
+  margin-top: 1.5rem;
+  border: 1px solid var(--color-hairline);
+  border-radius: 18px;
+  background: #fff;
+  overflow: hidden;
+}
+.kc-checkout-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.kc-checkout-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.kc-checkout-note {
+  margin-top: 2px;
+  color: var(--color-ink-soft);
+  font-size: 0.85rem;
+}
+/* Stripe sizes its own iframe; this only stops it touching the panel edge. */
+.kc-checkout > div:last-child {
+  padding: 8px 10px 16px;
+}
+
+/* =====================================================================
+   REGISTRATION: FORM LEFT, SUMMARY PINNED RIGHT
+
+   The shape every online shop uses for a checkout. The price, the seats and
+   what is actually being bought never scroll away, and when payment starts the
+   card fields take the left column while that summary stays put: nothing
+   navigates and nothing is replaced by a screen the parent has not seen.
+
+   Below 1024px it collapses to one column and the summary lands at the end of
+   the form, exactly where the totals block used to be. Sticky is a desktop
+   affordance here: pinning a 200px panel to a phone screen takes a third of the
+   viewport away from the fields somebody is trying to type into.
+   ===================================================================== */
+.kc-reg {
+  display: grid;
+  gap: 20px;
+  margin-top: 1.5rem;
+}
+@media (min-width: 1024px) {
+  .kc-reg {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+    gap: 28px;
+  }
+}
+.kc-reg-main {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .kc-reg-side {
+    position: sticky;
+    /* Clears the site header, which is sticky too. */
+    top: 88px;
+  }
+}
+
+.kc-summary {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  padding: 20px;
+  box-shadow: 0 6px 20px rgb(6 35 28 / 0.06);
+}
+.kc-summary-eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+}
+.kc-summary-class {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-green-900);
+}
+.kc-summary-school {
+  margin-top: 2px;
+  font-size: 0.85rem;
+  color: var(--color-ink-soft);
+}
+.kc-summary-lines {
+  margin: 16px 0;
+  border-top: 1px solid var(--color-hairline);
+  padding-top: 14px;
+  font-size: 0.9rem;
+}
+.kc-summary-lines > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-ink-soft);
+}
+.kc-summary-lines > div + div {
+  margin-top: 10px;
+}
+.kc-summary-total {
+  border-top: 1px solid var(--color-hairline);
+  padding-top: 12px;
+}
+.kc-summary-total dt {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.kc-summary-total dd {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-green-900);
+}
+.kc-summary-note {
+  margin-top: 12px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-ink-soft);
+}
+
+/* =====================================================================
+   HERO: THE CLASSES THEMSELVES
+
+   Four real classes instead of a mascot. The picture is the program's own, the
+   seat count is the same one the registration path decrements, and each card
+   goes to that class, so the hero is the first step of the journey rather than
+   decoration above it.
+   ===================================================================== */
+.kc-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 520px) {
+  .kc-hero-grid {
+    gap: 10px;
+  }
+}
+
+.kc-hero-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgb(6 35 28 / 0.08);
+  /* A gentle stagger, so four cards read as a handful rather than a table.
+     Index driven rather than random, so server and client agree exactly and
+     nothing jumps on hydration. */
+  transform: translateY(calc(var(--i) % 2 * 14px));
+  transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 220ms ease;
+}
+@media (hover: hover) {
+  .kc-hero-card:hover {
+    transform: translateY(calc(var(--i) % 2 * 14px - 4px));
+    box-shadow: 0 14px 32px rgb(6 35 28 / 0.14);
+  }
+}
+.kc-hero-card:focus-visible {
+  outline: 3px solid var(--color-green-500);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kc-hero-card,
+  .kc-hero-card:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+.kc-hero-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  background: var(--color-green-100);
+  overflow: hidden;
+}
+.kc-hero-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.kc-hero-art[data-empty] {
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-green-600);
+}
+/* Only when it is nearly gone. A badge on every card is wallpaper. */
+.kc-hero-flag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-sun);
+  color: #3d2f00;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.kc-hero-body {
+  display: block;
+  padding: 10px 12px 12px;
+}
+.kc-hero-track {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
+}
+.kc-hero-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-green-900);
+}
+.kc-hero-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  color: var(--color-ink-soft);
 }

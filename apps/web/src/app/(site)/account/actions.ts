@@ -73,6 +73,6 @@ export async function updateProfile(_prev: AuthState, formData: FormData): Promi
   await sql`update parents set full_name = ${fullName}, phone = ${phone}
              where id = ${parent.id}`;
 
-  revalidatePath("/portal");
+  revalidatePath("/dashboard");
   return { error: null };
 }

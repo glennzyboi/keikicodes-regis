@@ -15,7 +15,7 @@ test.describe("signed out", () => {
 
   test("every private page redirects to the right sign in", async ({ page }) => {
     const cases: [string, RegExp][] = [
-      ["/portal", /\/login/],
+      ["/dashboard", /\/login/],
       ["/admin", /\/admin\/login/],
       ["/admin/money", /\/admin\/login/],
       ["/admin/families", /\/admin\/login/],
@@ -24,6 +24,18 @@ test.describe("signed out", () => {
       ["/admin/schedule", /\/admin\/login/],
       ["/admin/holds", /\/admin\/login/],
       ["/admin/notifications", /\/admin\/login/],
+      ["/admin/setup/campuses", /\/admin\/login/],
+      ["/admin/setup/programs", /\/admin\/login/],
+      ["/admin/setup/terms", /\/admin\/login/],
+      // The tabs on a class are routes of their own now, so each one is its own
+      // chance to have been added without a gate. The (console) layout is the
+      // single gate, which is the point, but a list that only names the parent
+      // route would not notice if that stopped being true.
+      ["/admin/classes/new", /\/admin\/login/],
+      // The old address for the dashboard, which every confirmation email ever
+      // sent still points at. It has to keep working, and it has to end up
+      // behind the same sign in.
+      ["/portal", /\/login/],
     ];
 
     for (const [path, expected] of cases) {
@@ -40,10 +52,27 @@ test.describe("signed out", () => {
   });
 
   test("public pages stay public", async ({ page }) => {
-    for (const path of ["/", "/login", "/signup"]) {
+    for (const path of ["/", "/login", "/signup", "/programs", "/register"]) {
       const res = await page.goto(path);
       expect(res?.status(), `${path} should be reachable`).toBe(200);
     }
+
+    // A class detail page is public too: it is the thing parents send each
+    // other, so putting it behind an account would defeat the point of it
+    // having an address at all.
+    const [cls] = await sql<{ id: string }[]>`
+      select id from class_offerings where status = 'published' limit 1`;
+    const res = await page.goto(`/programs/${cls.id}`);
+    expect(res?.status(), "a class page is shareable").toBe(200);
+  });
+
+  test("the old dashboard address is a permanent redirect, not a 404", async ({ request }) => {
+    // 308 rather than 302 or a React page that redirects: this URL is in every
+    // confirmation email we have ever sent, and a mail client and a search
+    // engine should both be told it moved for good.
+    const res = await request.get("/portal", { maxRedirects: 0 });
+    expect(res.status()).toBe(308);
+    expect(res.headers()["location"]).toContain("/dashboard");
   });
 
   test("every write endpoint refuses an anonymous caller", async ({ request }) => {
@@ -65,10 +94,12 @@ test.describe("signed out", () => {
     expect(register.status(), "register must refuse anonymous").toBe(401);
 
     if (enrollment) {
+      // No reason code, on purpose: identity is checked before the body, so
+      // somebody who is not signed in never learns the shape of this endpoint.
       const cancel = await request.post("/api/portal/cancel", {
         data: { enrollmentId: enrollment.id },
       });
-      expect(cancel.status(), "cancel must refuse anonymous").toBe(401);
+      expect(cancel.status(), "cancel must refuse anonymous before validating").toBe(401);
     }
 
     if (order) {
@@ -120,7 +151,9 @@ test.describe("a parent is not staff", () => {
 
     if (otherEnrollment) {
       const res = await page.request.post("/api/portal/cancel", {
-        data: { enrollmentId: otherEnrollment.id },
+        // A valid body, deliberately. Being refused for a malformed request
+        // proves nothing about who owns the enrollment.
+        data: { enrollmentId: otherEnrollment.id, reasonCode: "cost" },
       });
       expect(res.status(), "another family's enrollment must not cancel").toBe(404);
 
@@ -192,7 +225,7 @@ test.describe("staff", () => {
 
   test("an address that does not exist gets the identical message", async ({ page }) => {
     await page.goto("/admin/login");
-    await page.locator("#email").fill("nobody-at-all@keikicoders.test");
+    await page.locator("#email").fill("nobody-at-all@keikicoders.com");
     await page.locator("#password").fill("whatever");
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form p[role=alert]")).toContainText(/do not match/i);
@@ -205,7 +238,7 @@ test.describe("staff", () => {
     // walk to the parent portal. This used to turn them into a parent, putting
     // the office address in the families list, and then 500 on the next render
     // when the insert hit the auth_user_id unique constraint.
-    const res = await page.goto("/portal");
+    const res = await page.goto("/dashboard");
     expect(res?.status(), "the portal must not error for staff").toBeLessThan(500);
     await expect(page).toHaveURL(/\/login/);
 

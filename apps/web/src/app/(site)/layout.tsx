@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { currentParent } from "@/lib/parent-auth";
 import { signOutParent } from "./account/actions";
+import { SiteNav } from "./site-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -26,19 +27,13 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
               Keiki Coders
             </span>
           </Link>
-          <nav className="flex items-center gap-2">
-            <Link href="/" className="kc-btn kc-btn-quiet text-sm">
-              Programs
-            </Link>
+          <SiteNav signedIn={Boolean(parent)} />
+
+          <div className="flex items-center gap-2">
             {parent ? (
-              <>
-                <Link href="/portal" className="kc-btn kc-btn-quiet text-sm">
-                  My registrations
-                </Link>
-                <form action={signOutParent}>
-                  <button className="kc-btn kc-btn-quiet text-sm">Sign out</button>
-                </form>
-              </>
+              <form action={signOutParent}>
+                <button className="kc-btn kc-btn-quiet text-sm">Sign out</button>
+              </form>
             ) : (
               <>
                 <Link href="/login" className="kc-btn kc-btn-quiet text-sm">
@@ -49,7 +44,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
                 </Link>
               </>
             )}
-          </nav>
+          </div>
         </div>
       </header>
 
@@ -71,11 +66,23 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
             </p>
           </div>
           <div className="text-sm">
-            <p className="font-display font-semibold">Campuses</p>
+            <p className="font-display font-semibold">Find a class</p>
             <ul className="mt-3 space-y-1.5 text-white/70">
-              <li>Iolani School</li>
-              <li>Maryknoll School</li>
-              <li>Kalani High School</li>
+              <li>
+                <Link href="/programs" className="hover:text-white">
+                  Browse by school
+                </Link>
+              </li>
+              <li>
+                <Link href="/register" className="hover:text-white">
+                  Register
+                </Link>
+              </li>
+              <li>
+                <Link href="/dashboard" className="hover:text-white">
+                  My family&apos;s classes
+                </Link>
+              </li>
             </ul>
           </div>
           <div className="text-sm">

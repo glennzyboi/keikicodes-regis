@@ -7,9 +7,9 @@
     "dev": "tsx watch --env-file=../web/.env.local src/index.ts",
     "start": "tsx --env-file-if-exists=../web/.env.local src/index.ts",
     "typecheck": "tsc --noEmit",
-    "job:notify": "tsx --env-file=../web/.env.local src/jobs/cli.ts notify",
-    "job:reminders": "tsx --env-file=../web/.env.local src/jobs/cli.ts reminders",
-    "job:sweep": "tsx --env-file=../web/.env.local src/jobs/cli.ts sweep"
+    "job:notify": "tsx --env-file-if-exists=../web/.env.local src/jobs/cli.ts notify",
+    "job:reminders": "tsx --env-file-if-exists=../web/.env.local src/jobs/cli.ts reminders",
+    "job:sweep": "tsx --env-file-if-exists=../web/.env.local src/jobs/cli.ts sweep"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",

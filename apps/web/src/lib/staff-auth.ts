@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { resolveStaff, type StaffMember } from "@keiki/core/identity";
@@ -38,15 +39,35 @@ export async function supabaseServer() {
   );
 }
 
-/** The signed in staff member, or null. */
-export async function currentStaff(): Promise<StaffMember | null> {
+/**
+ * The signed in staff member, or null.
+ *
+ * Wrapped in `cache()`, which is not an optimisation so much as a correctness
+ * fix. `getUser()` is a **network call to the auth server** on every invocation,
+ * and one console page asks this several times over: the proxy, the console
+ * layout, a nested layout, and `readAsStaff` inside the page itself. Rendering
+ * one class detail page was four round trips for one question.
+ *
+ * That is fine on its own and stops being fine at the scale the rail creates.
+ * Next prefetches every link in the viewport, and the rail is eleven of them, so
+ * moving around the console fires dozens of concurrent requests, each
+ * multiplying itself by four against a single local auth container. Anything
+ * that times out under that load comes back as "no user", which this side
+ * cannot tell apart from "signed out", so it redirects to the login page. That
+ * is the shape of "it keeps asking me to log in when I click between tabs".
+ *
+ * `cache()` is per request, not across requests, so this changes nothing about
+ * who is allowed in: the answer is still recomputed for every incoming request,
+ * just once instead of four times.
+ */
+export const currentStaff = cache(async (): Promise<StaffMember | null> => {
   const supabase = await supabaseServer();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
   return resolveStaff(user.id);
-}
+});
 
 /**
  * The access token for the current session, for calling the API service.

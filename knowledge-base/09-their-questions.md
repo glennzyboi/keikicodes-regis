@@ -68,6 +68,20 @@ credential, and reading your live system before designing the schema. Those are
 the parts I would defend in review, and the parts I tried to make legible in the
 comments.
 
+**Where it runs, and one decision worth the thirty seconds.** The site and the
+console are on Vercel; the catalogue API is a small service on Render; Postgres,
+auth and storage are Supabase. Everything is test mode.
+
+The decision inside that: the seat sweeper — the job that hands back a seat when
+somebody opens Stripe and wanders off — is **not** a scheduled container any
+more. The whole job is one statement, `select release_expired_holds()`, and
+every safety property it has, including that it will never touch a hold whose
+order has been paid, already lives inside that function. So it runs as a pg_cron
+job in the database itself, once a minute. A scheduler outside the database can
+be asleep, and a free web service is asleep after fifteen minutes of quiet,
+which is exactly when nobody is checking out and exactly when the holds are
+ageing. Moving it in cost nothing and removed a way for it to be silently wrong.
+
 **Two products, one database.** Parents get a branded, friendly site. Staff get
 an operations console with its own design system on its own route group: dark
 rail, Inter at 13px, tabular figures. Your playful rounded type is right for
@@ -406,11 +420,42 @@ Four of these I answered myself by reading your site, which is the point.
 
 ## Things to actually show, in order
 
-1. The front door, on **their real catalogue**. Pick Wai'alae, then Hanahau'oli,
-   which is marked "Enrolled through the school" with no Register button.
-2. `pnpm verify:api` against their live endpoints.
-3. The class editor: the schedule preview counting as you type, the holiday
-   struck through, the capacity refusal.
-4. A registration with two children, one payment, and the email in Mailpit.
-5. `pnpm thunder`.
-6. The import dry run: 28 of 28 reconcile.
+It is deployed, so the whole walkthrough can be done in a browser on
+**https://keikicoders-registration.vercel.app** with no terminal at all. The
+logins and the seven prepared states are in `10-test-it-yourself.md`.
+
+**The tour, roughly fifteen minutes.**
+
+1. **The front door, on their real catalogue.** Nineteen campuses, twenty-eight
+   classes, imported from their own endpoints. Pick Wai'alae: four classes, ours
+   to sell. Then Hanahau'oli: marked "Enrolled through the school", a link
+   straight to hanahauoli.org, and no Register button anywhere. That one screen
+   makes the point that I went and read their system first.
+2. **Register, end to end, with the card.** Two children in one submission, one
+   payment, checkout embedded on the page with the summary sticky beside it
+   rather than a bounce to a Stripe page. Then the confirmation, then the
+   family's dashboard.
+3. **The same registration from the office side.** Money → the order. Students →
+   the child. Classes → the class, seat count now one higher. Same event, four
+   places, one record.
+4. **The four hard questions, as pages rather than claims.** Existing parent
+   (register a second child on the same account and watch it attach). Two kids,
+   one order. Duplicate submission (press Register twice — the idempotency key
+   returns the same order). Payment succeeded but records failed (Money shows
+   "paid, not fulfilled", and it is a queue somebody works, not a lost payment).
+5. **Fifty parents, twelve seats.** Open *STEM Explorers: Tinker Lab*, one seat
+   from full. Explain that the refusal is a database constraint, not an
+   application check, and that `pnpm thunder` fires 50 simultaneous
+   registrations at 15 free seats and gets exactly 15 through.
+6. **A child who joined in week 4, and one who dropped in week 6.** Ekolu Wong
+   and Hina Silva. Dropping frees a seat and moves no money — that is the
+   distinction the brief asks for, and it is a different button from a refund.
+7. **A holiday, and a move.** Tinker Lab's Schedule tab: 16 September cancelled,
+   30 September moved to 1 October, numbering intact, families told once.
+8. **The Outbox, showing mail refused on purpose.** Good place to say that the
+   deployment is seeded with realistic addresses and the transport refuses to
+   write to them, and that turning real mail on is three deliberate steps.
+
+**If there is time, or for a second video:** `pnpm verify:api` against their live
+endpoints, the import dry run reconciling 28 of 28, and the test suite — 155
+browser tests, 62 schedule-engine checks, 14 database invariants.

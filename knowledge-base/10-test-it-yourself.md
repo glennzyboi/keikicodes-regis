@@ -1,8 +1,64 @@
 # Test it yourself
 
-*Everything you need to drive the system by hand. Rewritten 5 September 2026.*
+*Everything you need to drive the system by hand. Rewritten 6 September 2026,
+when it went live.*
 
 ---
+
+## The quickest way: it is already running
+
+Nothing to install. The whole thing is deployed, on your real catalogue, with a
+database full of believable families.
+
+**https://keikicoders-registration.vercel.app**
+
+| Role | Email | Password |
+|---|---|---|
+| **Office staff** | `ops@keikicoders.com` | `KeikiOps!2026` |
+| **Parent** | `malia.kealoha@gmail.com` | `KeikiParent!2026` |
+
+Staff sign in at `/admin`. Parents sign in at `/login`, or make a new account at
+`/signup` — email confirmation is off, so a new account works immediately and
+is a good way to show the "first time here" path.
+
+**Test card:** `4242 4242 4242 4242`, any future expiry, any CVC. Stripe is in
+test mode and no real money can move.
+
+The catalogue API is on Render at **https://keiki-api.onrender.com** —
+`/health`, `/public/schools`, `/public/programs`, `/public/catalogue`. It is on a
+free instance, so the first request after a quiet spell takes about a minute
+while it wakes up. Every request after that is immediate.
+
+**Email is deliberately switched off.** The database holds thirty six seeded
+families with realistic gmail addresses, which may belong to real people, so
+`DEMO_DATA=1` makes the mail transport refuse to deliver and record why. You
+will see confirmations arrive in the console's **Outbox** and stay there. That
+is the guard working, not a failure. `14-deployment.md` has the three things
+that have to be true before real mail is switched on.
+
+---
+
+## Seven states that are already in there, on purpose
+
+A demo of features is a description. These are already in the database so each
+sentence of the brief is a page you can open.
+
+| To show | Open |
+|---|---|
+| **A parent with two children, one of them in two classes** | Families → search `Kahananui` → Noelani Kahananui. Nalu is in two classes, Maile in one, one family, one login. |
+| **A child who joined mid semester** | Students → `Ekolu Wong`. Joined *Code Explorers: Virtual Reality* from week 4. Sessions before that are not his. |
+| **A child who dropped, and why that is not a refund** | Students → `Hina Silva`. Stopped at week 6, seat handed back, no money moved. |
+| **A cancellation waiting on a decision** | Overview, or Money → Cancellations. Kaimana Tanaka asked yesterday; the decision is a human's. |
+| **A session cancelled for a holiday** | Classes → *STEM Explorers: Tinker Lab* → Schedule. 16 September is cancelled, and the families were told. |
+| **A session moved to another day** | Same class, same tab. 30 September moved to 1 October, numbering intact. |
+| **A class one seat from full** | Classes → *STEM Explorers: Tinker Lab*. This is the one to open when you talk about fifty parents and twelve seats. |
+
+Every one of those names is a real person in the seed with a real email, real
+children and a real order behind them, so clicking through never dead-ends.
+
+---
+
+## If you would rather run it locally
 
 ## Before anything
 
@@ -42,15 +98,20 @@ it, payments are taken and never confirmed.
 
 ## Logins
 
-Recreated by every seed, so these always work.
+The same two accounts as the deployed prototype, recreated by every seed, so
+these always work.
 
 | Role | Email | Password |
 |---|---|---|
-| **Office staff** | `ops@keikicoders.test` | `KeikiOps!2026` |
-| **Parent** | `parent@keikicoders.test` | `KeikiParent!2026` |
+| **Office staff** | `ops@keikicoders.com` | `KeikiOps!2026` |
+| **Parent** | `malia.kealoha@gmail.com` | `KeikiParent!2026` |
 
 You can also sign up at http://localhost:3000/signup. Email confirmation is off
 locally, so you are signed in immediately.
+
+Locally, mail is **not** blocked: `DEMO_DATA` is unset and everything lands in
+Mailpit at http://127.0.0.1:55324, which is the better way to show a
+confirmation actually arriving.
 
 **Test card:** `4242 4242 4242 4242`, any future expiry, any CVC, any postcode.
 No real money moves, ever.

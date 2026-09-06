@@ -387,6 +387,70 @@ h1, h2, h3, h4, .font-display {
 }
 .kc-seats[data-low="true"] > span { background: var(--color-sun-deep); }
 
+/* ---------------------------------------------------------------------------
+   Seats, in two colours.
+
+   A solid green run for places that are paid for, then a hatched amber run for
+   places that are only being held while somebody finishes a checkout. The
+   hatch is doing real work: it reads as provisional at a glance, and it also
+   means the two states are still distinguishable when the colours are not,
+   which covers both colour blindness and a printed page.
+--------------------------------------------------------------------------- */
+.kc-seatbar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-green-100);
+  overflow: hidden;
+}
+.kc-seatbar-confirmed,
+.kc-seatbar-held {
+  display: block;
+  height: 100%;
+  transition: width 420ms var(--ease-out);
+}
+.kc-seatbar-confirmed { background: var(--color-green-700); }
+.kc-seatbar-held {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-sun-deep) 0 4px,
+    color-mix(in oklab, var(--color-sun-deep) 55%, white) 4px 8px
+  );
+}
+
+.kc-seat-note {
+  margin-top: 0.6rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+.kc-seat-note strong { color: var(--color-ink); font-weight: 600; }
+
+/* The sentence that stops a family bouncing off a class that is not really
+   gone. Given the same amber as the held run on the bar, so the colour and the
+   words agree. */
+.kc-seat-note-held {
+  border-left: 3px solid var(--color-sun-deep);
+  padding: 0.5rem 0 0.5rem 0.75rem;
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in oklab, var(--color-sun) 14%, white);
+  color: var(--color-ink);
+}
+
+/* "3 in checkout": the class is full this second, and might not be in five
+   minutes. Distinct from kc-chip-warn, which means "hurry, few left". */
+.kc-chip-held {
+  background: color-mix(in oklab, var(--color-sun) 16%, white);
+  border-color: color-mix(in oklab, var(--color-sun-deep) 45%, white);
+  color: #7a3d00;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-seatbar-confirmed,
+  .kc-seatbar-held { transition: none; }
+}
+
 /* The numbered steps in "how it works". */
 .kc-step-number {
   display: grid;
@@ -1013,66 +1077,50 @@ h1, h2, h3, h4, .font-display {
   }
 }
 
-/* =================================================================== stage */
+
+/* ==================================================== what happens, in steps */
 /*
-  The hero animation's box.
-
-  Sized here rather than by the player, so the poster and the film occupy
-  exactly the same space and nothing shifts when the player takes over. The
-  aspect ratio matches the composition (720x520) for the same reason.
+  Replaced the hero film. Four cards, evenly, on one row where there is room and
+  wrapping to two before they get too narrow to read. A left rule rather than a
+  full border on each: these are one sequence, not four unrelated objects, and
+  four boxed cards in a row is the shape that made the old page feel templated.
 */
-.kc-stage {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 720 / 520;
-  border-radius: var(--radius-panel);
-  overflow: hidden;
-  background: radial-gradient(120% 100% at 70% 0%, #f2f8f4 0%, #e6f1ea 45%, #dcece3 100%);
-  border: 1px solid var(--color-hairline);
-  box-shadow: var(--shadow-card);
-}
-
-/* The still. Deliberately the same scene at rest, so the page looks finished
-   before any JavaScript arrives and stays looking finished for anybody who
-   never gets it. */
-.kc-stage-poster {
-  position: absolute;
-  inset: 0;
+.kc-flow {
   display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 2.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.5rem 1.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: flow;
 }
-.kc-stage-steps {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
+.kc-flow-step {
+  border-left: 2px solid var(--color-green-200);
+  padding-left: 1rem;
+  min-width: 0;
 }
-.kc-stage-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.8rem;
-  border-radius: var(--radius-pill);
-  background: var(--color-paper);
-  border: 1px solid var(--color-hairline);
-  font-size: 0.8rem;
+.kc-flow-when {
+  display: block;
+  font-family: var(--font-display);
   font-weight: 600;
-  color: var(--color-green-900);
-  box-shadow: 0 10px 24px -14px rgb(6 35 28 / 0.3);
-  white-space: nowrap;
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-green-600);
 }
-.kc-stage-step-n {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--color-green-900);
-  color: #fff;
-  font-size: 0.65rem;
+.kc-flow-title {
+  margin-top: 0.35rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-green-900);
+  text-wrap: balance;
+}
+.kc-flow-body {
+  margin-top: 0.45rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--color-ink-soft);
 }
 
 /*
@@ -1277,6 +1325,59 @@ h1, h2, h3, h4, .font-display {
   background: #fff;
   overflow: hidden;
 }
+
+/* ---------------------------------------------------------------------------
+   The hold, counting down.
+
+   Green while there is plenty of time, amber inside the last two minutes, and
+   a plain warning once it has gone. The state is on a data attribute rather
+   than three class names so the whole block recolours from one place.
+--------------------------------------------------------------------------- */
+.kc-hold {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-green-100);
+}
+.kc-hold-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.kc-hold-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-green-900);
+}
+.kc-hold-clock {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  line-height: 1;
+  /* Tabular, or the whole row twitches sideways once a second as the digits
+     change width. On a number somebody is watching, that reads as broken. */
+  font-variant-numeric: tabular-nums;
+  color: var(--color-green-700);
+}
+.kc-hold-note {
+  margin-top: 6px;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+.kc-hold[data-state="urgent"] {
+  background: color-mix(in oklab, var(--color-sun) 20%, white);
+}
+.kc-hold[data-state="urgent"] .kc-hold-label { color: #7a3d00; }
+.kc-hold[data-state="urgent"] .kc-hold-clock { color: #7a3d00; }
+
+.kc-hold[data-state="expired"] {
+  background: color-mix(in oklab, var(--color-sun) 26%, white);
+  border-bottom-color: var(--color-sun-deep);
+}
+.kc-hold[data-state="expired"] .kc-hold-label { color: #7a3d00; }
 .kc-checkout-head {
   display: flex;
   flex-wrap: wrap;

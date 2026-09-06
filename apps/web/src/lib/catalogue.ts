@@ -25,6 +25,17 @@ export type Offering = {
   capacity: number;
   seatsTaken: number;
   seatsLeft: number;
+  /**
+   * The two halves of `seatsTaken`, and when the earliest hold lapses.
+   *
+   * `seatsTaken` alone cannot tell a family whether a class is genuinely gone or
+   * simply has two checkouts open, and those are different answers: one is
+   * "look elsewhere", the other is "check back in six minutes". Treating them as
+   * the same number turns an abandoned basket into a lost customer.
+   */
+  seatsConfirmed: number;
+  seatsHeld: number;
+  holdExpiresNext: string | null;
   priceCents: number | null;
   registrationMode: "keiki_coders" | "external";
   externalUrl: string | null;
@@ -81,6 +92,12 @@ const toOffering = (r: Row): Offering => ({
   capacity: Number(r.capacity),
   seatsTaken: Number(r.seats_taken),
   seatsLeft: Number(r.seats_left),
+  seatsConfirmed: Number(r.seats_confirmed ?? 0),
+  seatsHeld: Number(r.seats_held ?? 0),
+  holdExpiresNext:
+    r.hold_expires_next instanceof Date
+      ? r.hold_expires_next.toISOString()
+      : ((r.hold_expires_next as string) ?? null),
   priceCents: r.price_cents === null ? null : Number(r.price_cents),
   registrationMode: r.registration_mode as "keiki_coders" | "external",
   externalUrl: (r.external_registration_url as string) ?? null,

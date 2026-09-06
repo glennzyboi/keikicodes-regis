@@ -200,7 +200,7 @@ test.describe("browsing and registering", () => {
     await sql`delete from class_offerings where id = ${other.id}`;
   });
 
-  test("the date field types, advances, pastes and clamps", async ({ page }) => {
+  test("the date field keeps what you chose, and cannot offer an impossible date", async ({ page }) => {
     await signUpParent(page, `${unique("dates")}@example.test`);
     const cls = await freeClass(1);
     await page.goto(`/register/${cls.id}`);
@@ -210,53 +210,46 @@ test.describe("browsing and registering", () => {
     const month = parts.locator(".df-m");
     const year = parts.locator(".df-y");
 
-    // Partial input survives. Publishing an empty ISO used to feed back and
-    // blank the box that had just been filled.
-    await day.fill("30");
+    // The bug this field was rewritten for. The typed version emitted an empty
+    // ISO while the date was incomplete, the form wrote that back as the
+    // controlled value, and the resync then wiped every box. So: choose one
+    // part, choose another, and the first must still be there.
+    await day.selectOption("30");
     await expect(day).toHaveValue("30");
+    await month.selectOption("01");
+    await expect(day, "choosing a month must not clear the day").toHaveValue("30");
+    await year.selectOption("2015");
+    await expect(day).toHaveValue("30");
+    await expect(month).toHaveValue("01");
 
-    // Two digits move you on without a click, which is the whole point of
-    // typing over choosing.
-    await day.focus();
-    await day.press("Backspace");
-    await day.press("Backspace");
-    await day.pressSequentially("07");
-    await expect(month).toBeFocused();
+    // And going back to change one part keeps the rest, which is the case that
+    // used to destroy a finished birthday.
+    await day.selectOption("07");
+    await expect(month).toHaveValue("01");
+    await expect(year).toHaveValue("2015");
 
-    // A single digit that cannot be the start of anything else also moves on:
-    // there is no month starting with 4.
-    await month.pressSequentially("4");
-    await expect(year).toBeFocused();
-
-    // Backspace at the start of a box steps back to the previous one.
-    await year.press("Backspace");
-    await expect(month).toBeFocused();
-
-    // February cannot have 30 days, and the clamp happens once both are known.
-    await day.fill("30");
-    await month.fill("02");
-    await year.fill("2015");
+    // 30 February is not offerable rather than being corrected after the fact.
+    await day.selectOption("30");
+    await month.selectOption("02");
     expect(
       Number(await day.inputValue()),
       "February cannot have 30 days",
-    ).toBeLessThanOrEqual(28);
+    ).toBeLessThanOrEqual(29);
+    await expect(day.locator("option[value='30']"), "no 30th in February").toHaveCount(0);
 
-    // People paste dates. All three boxes fill from one.
-    await day.fill("");
-    await month.fill("");
-    await year.fill("");
-    await day.focus();
-    await page.evaluate(() => {
-      const el = document.querySelector(".df-parts .df-d") as HTMLInputElement;
-      const data = new DataTransfer();
-      data.setData("text", "05/05/2016");
-      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
-    });
-    await expect(day).toHaveValue("05");
-    await expect(month).toHaveValue("05");
-    await expect(year).toHaveValue("2016");
+    // Years run most recent first, so a school-age child is near the top rather
+    // than nineteen rows down.
+    const years = await year.locator("option").allInnerTexts();
+    const numeric = years.slice(1).map(Number);
+    expect(numeric[0]).toBeGreaterThan(numeric[numeric.length - 1]);
+
+    // Months are names, so there is no MM/DD versus DD/MM to get wrong.
+    await expect(month.locator("option").nth(1)).toHaveText("January");
 
     // And it says back what it understood, so a mistyped birthday is visible.
+    await day.selectOption("05");
+    await month.selectOption("05");
+    await year.selectOption("2016");
     await expect(parts.locator("xpath=following-sibling::*").first()).toContainText("5 May 2016");
   });
 });

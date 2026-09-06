@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { artFor, ProgramMark } from "./program-art";
 import { GRADE_LABELS } from "@/lib/grades";
+import { SeatChip, seatState } from "./seats";
 import type { Offering } from "@/lib/catalogue";
 
 /**
@@ -60,9 +61,12 @@ export function gradeChip(cls: Offering) {
 export function ClassCard({ cls, showCampus = true }: { cls: Offering; showCampus?: boolean }) {
   const art = artFor(cls.subject ?? cls.title);
   const external = cls.registrationMode === "external";
-  const left = cls.seatsLeft;
-  const full = !external && left <= 0;
-  const low = !external && !full && left <= 3;
+  const state = seatState(cls);
+  // "Full" now means every seat is paid for. A class whose last seats are open
+  // checkouts is `held-out`, and it keeps its Register button: the transaction
+  // refuses the seat if it really has gone, so letting someone try costs
+  // nothing and turning them away costs a customer.
+  const full = !external && state === "full";
   const grades = gradeChip(cls);
 
   return (
@@ -85,12 +89,8 @@ export function ClassCard({ cls, showCampus = true }: { cls: Offering; showCampu
             {cls.track && <span className="kc-chip kc-chip-accent">{cls.track}</span>}
             {external ? (
               <span className="kc-chip">Via the school</span>
-            ) : full ? (
-              <span className="kc-chip">Full</span>
             ) : (
-              <span className={`kc-chip ${low ? "kc-chip-warn" : ""}`}>
-                {left === 1 ? "1 seat left" : `${left} seats left`}
-              </span>
+              <SeatChip cls={cls} />
             )}
           </span>
         </div>

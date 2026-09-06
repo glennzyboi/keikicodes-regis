@@ -2,7 +2,7 @@ import Link from "next/link";
 import { sql } from "@keiki/core/db";
 import { cachedCampuses } from "@/lib/catalogue-cache";
 import { HeroPrograms } from "./hero-programs";
-import { HeroStage } from "./hero-stage";
+import { WhatHappens } from "./what-happens";
 import { Reveal, CountUp } from "./reveal";
 
 export const dynamic = "force-dynamic";
@@ -126,12 +126,13 @@ export default async function Home() {
           </Reveal>
 
           {/*
-            The film sits here now rather than in the hero. It was always an
-            explainer, and this is the part of the page doing the explaining;
-            above the fold a parent wants to see classes, not a story about them.
+            The mascot film used to sit here, took the full width, and explained
+            nothing. What belongs in the space is the part that is actually
+            different from the form parents are used to: what the system does on
+            its own once they press pay. See what-happens.tsx.
           */}
           <div className="mt-8">
-            <HeroStage />
+            <WhatHappens />
           </div>
 
           <div className="mt-10 grid gap-8 sm:grid-cols-3">

@@ -1,12 +1,41 @@
 import { NextResponse } from "next/server";
+import type { TransactionSql } from "postgres";
 import { sql } from "@keiki/core/db";
 import { stripe } from "@keiki/core/stripe";
 import { RegistrationInput, createPendingOrder } from "@keiki/core/registration";
-import { HOLD_SECONDS } from "@keiki/core/holds";
+import { stripeSessionExpiry } from "@keiki/core/holds";
 import { currentParent } from "@/lib/parent-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * When this order's seats actually stop being held.
+ *
+ * Read back rather than calculated from HOLD_MINUTES, because the number the
+ * checkout counts down has to be the one in the database. A reused order is the
+ * case that makes the difference: its hold was created on the first attempt, so
+ * a parent who resubmits four minutes later has six minutes left, not ten.
+ * Calculating it would show them a timer that is quietly wrong and would expire
+ * their seat while it still read 04:00.
+ *
+ * `min` because an order can hold several seats and the first one to lapse is
+ * the one that matters.
+ */
+async function holdExpiry(
+  // The transaction, not the pool: this has to read rows the surrounding
+  // transaction has just written and not yet committed. Same alias the rest of
+  // the codebase uses for this, in core/src/notify.ts and schedule.ts.
+  tx: TransactionSql,
+  orderId: string,
+): Promise<string | null> {
+  const [row] = await tx<{ expires_at: Date | null }[]>`
+    select min(sh.expires_at) as expires_at
+      from seat_holds sh
+      join order_items oi on oi.id = sh.order_item_id
+     where oi.order_id = ${orderId}`;
+  return row?.expires_at ? row.expires_at.toISOString() : null;
+}
 
 /**
  * Phase one and phase two of a registration.
@@ -80,7 +109,12 @@ export async function POST(req: Request) {
         order.stripe_checkout_session_id,
       );
       if (existing.status === "open" && existing.client_secret) {
-        return { orderId: order.id, clientSecret: existing.client_secret, reused: true };
+        return {
+          orderId: order.id,
+          clientSecret: existing.client_secret,
+          reused: true,
+          holdExpiresAt: await holdExpiry(tx, order.id),
+        };
       }
     }
 
@@ -127,8 +161,12 @@ export async function POST(req: Request) {
         // so it copes with arriving before fulfilment has finished, which is the
         // normal case rather than the exception.
         return_url: `${appUrl}/confirming?order=${order.id}`,
-        // Same lifetime as the seat hold, so the two can never disagree.
-        expires_at: Math.floor(Date.now() / 1000) + HOLD_SECONDS,
+        // Stripe's own floor, which is thirty minutes and is longer than the
+        // ten minute seat hold. It used to match the hold exactly; it cannot
+        // any more, because the API refuses anything shorter. The gap is closed
+        // by /api/jobs/sweep, which expires the session once its hold is gone,
+        // so the two still cannot disagree for long. See core/src/holds.ts.
+        expires_at: stripeSessionExpiry(),
       },
       // A retried API call returns the same session instead of a second charge.
       { idempotencyKey: `checkout:${order.id}` },
@@ -137,7 +175,12 @@ export async function POST(req: Request) {
     await tx`update orders set stripe_checkout_session_id = ${session.id}
               where id = ${order.id}`;
 
-    return { orderId: order.id, clientSecret: session.client_secret, reused: result.reused };
+    return {
+      orderId: order.id,
+      clientSecret: session.client_secret,
+      reused: result.reused,
+      holdExpiresAt: await holdExpiry(tx, order.id),
+    };
   });
 
   return NextResponse.json(checkout);

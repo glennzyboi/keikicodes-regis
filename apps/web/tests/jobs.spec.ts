@@ -116,22 +116,31 @@ test.describe("the notification worker", () => {
     }
   });
 
-  test("every seeded family is recorded as invented", async () => {
-    // The guard above is only as good as this table. A new demo scenario that
-    // adds a family and forgets to register its address would otherwise be
-    // discovered by an email arriving at a stranger's inbox.
-    //
-    // "No login" is the shape of a seeded family: real people arrive by signing
-    // up, which mints an auth user. The one exception is checked separately
-    // below, and it is the exception that nearly slipped through.
+  test("no deliverable address can be written to unless it is a real signup", async () => {
+    /*
+     * The guard is only as good as this table, so this is the check that a new
+     * demo scenario cannot quietly add a family and forget to register it.
+     *
+     * The rule is about deliverability, not about logins. The first version
+     * asked for "every parent with no auth account", which is the shape of a
+     * seeded family and is also the shape of every parent the rest of this
+     * suite creates, so it failed on fifty of its own fixtures.
+     *
+     * `.test` is reserved by RFC 6761 and has no mail exchanger anywhere in the
+     * world, which is why the fixtures use it. Excluding it is not a
+     * convenience: an address that cannot be delivered to is exactly the thing
+     * this guard does not need to protect. Everything else with no login was
+     * put there by the seed and must be on the list.
+     */
     const missing = await sql<{ email: string }[]>`
       select p.email from parents p
        where p.auth_user_id is null
+         and p.email !~* '@([^@]*\\.)?(test|example|invalid|localhost)$'
          and not exists (
            select 1 from demo_addresses d where lower(d.address) = lower(p.email))`;
     expect(
       missing.map((m) => m.email),
-      "seeded families with no demo_addresses row could be emailed for real",
+      "these could be real mailboxes and nothing is stopping a send to them",
     ).toEqual([]);
   });
 

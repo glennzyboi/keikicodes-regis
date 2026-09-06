@@ -56,6 +56,46 @@
   letter-spacing: 0.06em;
 }
 
+/*
+  The three boxes are selects now. Same 16px floor for the same iOS reason, and
+  left aligned rather than centred because a month name is a word, not a pair of
+  digits, and centred words next to a native dropdown arrow look accidental.
+*/
+.df-parts select {
+  width: 100%;
+  min-width: 0;
+  font-size: 16px;
+  min-height: 46px;
+  padding-inline: 0.5rem;
+  padding-right: 1.6rem;
+  text-align: left;
+  /* The arrow is drawn rather than left to the platform, so the three controls
+     look like one field on Windows, macOS and Android instead of three
+     different ones. */
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 0.85rem center, right 0.6rem center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/*
+  Month holds "September" and needs roughly twice the room of a day number; the
+  year is four digits. Overriding the generic ratios above, which were written
+  for three equally narrow typed boxes.
+*/
+.df-box-month { flex-grow: 2.1; }
+.df-box:last-child { flex-grow: 1.25; }
+
+/* Below this the three controls stop fitting on one line with a month name in
+   the middle, so they stack rather than squeezing to unreadable widths. */
+@media (max-width: 380px) {
+  .df-parts { flex-wrap: wrap; }
+  .df-box { flex: 1 1 100%; }
+}
+
 /* The line under the boxes: what was entered, written out, and the calendar. */
 .df-foot {
   display: flex;

@@ -1,5 +1,14 @@
 import { test, expect } from "@playwright/test";
-import { sql, signInStaff, signUpParent, unique } from "./helpers";
+import {
+  sql,
+  signInStaff,
+  signUpParent,
+  unique,
+  freeClass,
+  fillDate,
+  fillRegistration,
+} from "./helpers";
+import { HOLD_MINUTES } from "@keiki/core/holds";
 import { PER_PAGE } from "../src/app/admin/ui";
 
 /**
@@ -452,9 +461,7 @@ test.describe("the photo upload", () => {
     await page.locator("#fn-0").fill("Nophoto");
     await page.locator("#ln-0").fill("Child");
     await page.locator("#grade-0").selectOption(String(cls.grade_min ?? 3));
-    await page.locator(".df-parts .df-d").fill("05");
-    await page.locator(".df-parts .df-m").fill("05");
-    await page.locator(".df-parts .df-y").fill("2016");
+    await fillDate(page, 0, "2016-05-05");
     await page.locator("#attends-0").check();
     await page.locator("#consent").check();
 
@@ -472,4 +479,190 @@ test.describe("the photo upload", () => {
        where p.email = ${email}`;
     expect(orders[0].n, "no order is created when the form is refused").toBe(0);
   });
+});
+
+/**
+ * Seats that are held are not seats that are sold.
+ *
+ * The commercial bug this guards: a class whose last places are open checkouts
+ * used to read "Full", so a parent who would have bought closed the tab, and
+ * ten minutes later the holds lapsed and the seats sat empty. Both directions
+ * matter, so both are asserted: a held-out class must invite them in, and a
+ * genuinely sold-out one must not.
+ */
+test.describe("held seats versus sold seats", () => {
+  /** Fill a class to capacity, `held` of those places as live seat holds. */
+  async function fillClass(classId: string, held: number) {
+    const [{ capacity, seats_taken }] = await sql<
+      { capacity: number; seats_taken: number }[]
+    >`select capacity, seats_taken from class_offerings where id = ${classId}`;
+
+    const free = capacity - seats_taken;
+
+    // Its own family rather than borrowing one. The suite seeds with
+    // --no-families, so `select ... from children limit 1` returns nothing and
+    // the fixture died on `child.id` before reaching anything under test.
+    const [parent] = await sql<{ id: string }[]>`
+      insert into parents (email, full_name)
+      values (${`${unique("seatfill")}@example.test`}, 'Seat Fill')
+      returning id`;
+
+    for (let i = 0; i < free; i++) {
+      // A distinct child per seat. Enrolments are unique on
+      // (class_offering_id, child_id) for live statuses, so reusing one child
+      // would silently drop every insert after the first while seats_taken kept
+      // climbing, leaving seats_taken > enrolled + held and breaking the very
+      // invariant these two tests are about.
+      const [child] = await sql<{ id: string }[]>`
+        insert into children (parent_id, first_name, last_name, date_of_birth, grade)
+        values (${parent.id}, ${`Filler${i}`}, 'Child', '2016-01-01'::date, 3)
+        returning id`;
+      const [order] = await sql<{ id: string }[]>`
+        insert into orders (parent_id, amount_cents, currency, status, idempotency_key)
+        values (${parent.id}, 0, 'usd', 'pending', ${`seatstate:${classId}:${i}:${Date.now()}`})
+        returning id`;
+      const [item] = await sql<{ id: string }[]>`
+        insert into order_items (order_id, class_offering_id, child_id, unit_price_cents)
+        values (${order.id}, ${classId}, ${child.id}, 0) returning id`;
+      // The last `held` of them stay as holds; the rest become enrolments, so
+      // the invariant enrolled + held = seats_taken holds either way.
+      if (i >= free - held) {
+        await sql`insert into seat_holds (order_item_id, class_offering_id, expires_at)
+                  values (${item.id}, ${classId}, now() + interval '9 minutes')`;
+      } else {
+        await sql`insert into enrollments (class_offering_id, child_id, order_item_id, status)
+                  values (${classId}, ${child.id}, ${item.id}, 'active')
+                  on conflict do nothing`;
+      }
+      await sql`update class_offerings set seats_taken = seats_taken + 1 where id = ${classId}`;
+    }
+  }
+
+  test("a class that is only full because of holds still invites a parent in", async ({ page }) => {
+    const [cls] = await sql<{ id: string }[]>`
+      select c.id from class_offerings c
+       where c.status = 'published' and c.registration_mode = 'keiki_coders'
+         and c.capacity - c.seats_taken between 2 and 20
+         -- No live holds already on it. Earlier specs leave holds behind, and
+         -- both assertions below are about exact hold counts, so a class that
+         -- arrives with five of somebody else's is not a clean fixture.
+         and not exists (
+           select 1 from seat_holds sh
+            where sh.class_offering_id = c.id and sh.expires_at > now())
+       order by random() limit 1`;
+    test.skip(!cls, "no sellable class with free seats");
+
+    await fillClass(cls.id, 2);
+
+    const [row] = await sql<{ seats_left: number; seats_held: number }[]>`
+      select seats_left, seats_held from offering_details where id = ${cls.id}`;
+    expect(row.seats_left, "the class is full on paper").toBe(0);
+    expect(row.seats_held, "but two of those places are only held").toBe(2);
+
+    // The public catalogue is cached for thirty seconds by tag, and this
+    // fixture writes seats straight to the database instead of going through
+    // the app, so nothing called updateTag. Polling rather than sleeping means
+    // this passes the moment the window turns over, and it documents a real
+    // property of the product: a seat count on a public page can be up to half
+    // a minute stale. Overselling is prevented by the database, never by that
+    // number being small.
+    await expect
+      .poll(
+        async () => {
+          await page.goto(`/programs/${cls.id}`, { waitUntil: "domcontentloaded" });
+          return page.getByText(/in someone else's checkout/i).count();
+        },
+        { timeout: 45_000, message: "the cached class page should catch up" },
+      )
+      .toBeGreaterThan(0);
+
+    // The words a parent reads. "Full" on its own is what loses the lead.
+    await expect(page.getByText(/Full for the moment/i)).toBeVisible();
+
+    // And the way out is still open, because the transaction refuses safely if
+    // the seat has genuinely gone.
+    const cta = page.getByRole("link", { name: /Try for a held seat/i });
+    await expect(cta).toBeVisible();
+    await expect(cta).toHaveAttribute("href", `/register/${cls.id}`);
+  });
+
+  test("a class where every seat is paid for says so, and offers no way in", async ({ page }) => {
+    const [cls] = await sql<{ id: string }[]>`
+      select c.id from class_offerings c
+       where c.status = 'published' and c.registration_mode = 'keiki_coders'
+         and c.capacity - c.seats_taken between 2 and 20
+         -- No live holds already on it. Earlier specs leave holds behind, and
+         -- both assertions below are about exact hold counts, so a class that
+         -- arrives with five of somebody else's is not a clean fixture.
+         and not exists (
+           select 1 from seat_holds sh
+            where sh.class_offering_id = c.id and sh.expires_at > now())
+       order by random() limit 1`;
+    test.skip(!cls, "no sellable class with free seats");
+
+    await fillClass(cls.id, 0);
+
+    const [row] = await sql<{ seats_held: number; seats_confirmed: number }[]>`
+      select seats_held, seats_confirmed from offering_details where id = ${cls.id}`;
+    expect(row.seats_held, "nothing is merely held").toBe(0);
+
+    // Same thirty second catalogue cache as the test above.
+    await expect
+      .poll(
+        async () => {
+          await page.goto(`/programs/${cls.id}`, { waitUntil: "domcontentloaded" });
+          return page.getByText(/places are taken and paid for/i).count();
+        },
+        { timeout: 45_000, message: "the cached class page should catch up" },
+      )
+      .toBeGreaterThan(0);
+
+    await expect(page.getByRole("link", { name: /Register for this class/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Try for a held seat/i })).toHaveCount(0);
+  });
+});
+
+/**
+ * The countdown on the checkout.
+ *
+ * A hold is a promise with a deadline, and before this the deadline was
+ * invisible: a parent who went to find their card came back to a page that
+ * looked identical whether they had eight minutes left or none.
+ */
+test("the checkout shows how long the seats are held for", async ({ page }) => {
+  const email = `${unique("timer")}@example.test`;
+  await signUpParent(page, email, "Timer Family");
+  const target = await freeClass(1);
+
+  await page.goto(`/register/${target.id}`);
+  // The phone is a parent field, so fillRegistration does not touch it. It is
+  // required, and leaving it out puts the form in its error state rather than
+  // reaching checkout at all.
+  await page.locator("#parent-phone").fill("808-555-0166");
+  await fillRegistration(
+    page,
+    0,
+    { first: "Tick", last: unique("Kid").replace(/-/g, ""), dob: "2016-03-03" },
+    target,
+  );
+  await page.locator("#consent").check();
+  await page.getByRole("button", { name: /Continue to payment/i }).click();
+
+  // mm:ss, counting down, above the card fields.
+  // The digits only. The element also carries a screen reader sentence.
+  const clock = page.locator(".kc-hold-digits");
+  await expect(clock).toBeVisible({ timeout: 45_000 });
+  await expect(clock).toHaveText(/^\d{2}:\d{2}$/);
+
+  // It is the real hold, not a number invented in the browser: within a minute
+  // of HOLD_MINUTES, and never longer than it.
+  const [mm, ss] = (await clock.innerText()).split(":").map(Number);
+  const seconds = mm * 60 + ss;
+  expect(seconds).toBeGreaterThan((HOLD_MINUTES - 1) * 60);
+  expect(seconds).toBeLessThanOrEqual(HOLD_MINUTES * 60);
+
+  // And it is actually running.
+  const first = await clock.innerText();
+  await page.waitForTimeout(2200);
+  expect(await clock.innerText(), "the clock ticks").not.toBe(first);
 });

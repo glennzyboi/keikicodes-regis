@@ -5,6 +5,7 @@ import { cachedOfferingById, cachedSessionsFor } from "@/lib/catalogue-cache";
 import { GRADE_LABELS } from "@/lib/grades";
 import { artFor, ProgramMark } from "../../program-art";
 import { timeLabel } from "../../class-card";
+import { SeatBar, SeatSummary, seatState } from "../../seats";
 
 export const dynamic = "force-dynamic";
 
@@ -59,10 +60,14 @@ export default async function ProgramDetail({ params }: { params: Promise<{ id: 
   const sessions = await cachedSessionsFor(cls.id);
   const art = artFor(cls.subject ?? cls.title);
   const external = cls.registrationMode === "external";
-  const full = !external && cls.seatsLeft <= 0;
+  const state = seatState(cls);
+  // "Full" is now reserved for every seat being paid for. `held-out` means the
+  // remaining seats are open checkouts, which is a different message and a
+  // different button.
+  const full = !external && state === "full";
+  const heldOut = !external && state === "held-out";
   const running = sessions.filter((s) => s.status === "scheduled");
   const off = sessions.filter((s) => s.status === "cancelled");
-  const filled = cls.capacity > 0 ? Math.round((cls.seatsTaken / cls.capacity) * 100) : 0;
 
   const grades =
     cls.gradeLabel ??
@@ -128,7 +133,12 @@ export default async function ProgramDetail({ params }: { params: Promise<{ id: 
               </span>
             ) : (
               <Link href={`/register/${cls.id}`} className="kc-btn kc-btn-primary">
-                Register for this class
+                {/* A class whose last seats are open checkouts still gets a live
+                    button. The registration transaction is the thing that knows
+                    whether a seat exists, and it refuses safely, so letting
+                    someone try costs a refusal and turning them away costs a
+                    family. */}
+                {heldOut ? "Try for a held seat" : "Register for this class"}
               </Link>
             )}
 
@@ -184,19 +194,8 @@ export default async function ProgramDetail({ params }: { params: Promise<{ id: 
 
             {!external && (
               <div className="mt-5">
-                <span
-                  className="kc-seats block"
-                  data-low={cls.seatsLeft <= 3 && cls.seatsLeft > 0}
-                  role="img"
-                  aria-label={`${filled} percent full`}
-                >
-                  <span style={{ width: `${Math.min(filled, 100)}%` }} />
-                </span>
-                <p className="mt-2 text-sm text-ink-soft">
-                  {full
-                    ? "Every place has gone for this term."
-                    : `${cls.seatsTaken} of ${cls.capacity} places taken.`}
-                </p>
+                <SeatBar cls={cls} />
+                <SeatSummary cls={cls} />
               </div>
             )}
 

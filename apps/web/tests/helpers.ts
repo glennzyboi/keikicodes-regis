@@ -129,9 +129,13 @@ export async function signOutEverywhere(context: BrowserContext) {
 export async function fillDate(page: Page, index: number, iso: string) {
   const [year, month, day] = iso.split("-");
   const block = page.locator(".df-parts").nth(index);
-  await block.locator(".df-d").fill(day);
-  await block.locator(".df-m").fill(month);
-  await block.locator(".df-y").fill(year);
+  // Selects now, not typed boxes. The three class hooks are deliberately the
+  // same, so this is the only place that had to change: the old typed version
+  // wiped itself when a controlled empty value came back, which is the bug the
+  // dropdowns exist to make impossible.
+  await block.locator(".df-d").selectOption(day);
+  await block.locator(".df-m").selectOption(month);
+  await block.locator(".df-y").selectOption(year);
 }
 
 /**

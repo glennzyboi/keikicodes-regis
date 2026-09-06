@@ -180,6 +180,10 @@ export default function RegisterForm({
    * second one.
    */
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // The real seat_holds.expires_at for this order, so the checkout counts down
+  // the hold that exists rather than one it assumes. A resubmitted registration
+  // reuses its original hold and has less time left than a fresh one.
+  const [holdExpiresAt, setHoldExpiresAt] = useState<string | null>(null);
   /**
    * Field level problems, keyed by the input's id.
    *
@@ -461,6 +465,7 @@ export default function RegisterForm({
       // navigates, so `busy` has to be released by hand: it used to rely on the
       // page being torn down by the redirect, which no longer happens.
       setClientSecret(data.clientSecret);
+      setHoldExpiresAt(data.holdExpiresAt ?? null);
       setBusy(false);
     } catch {
       setError("Could not reach the server. Nothing was charged.");
@@ -498,6 +503,7 @@ export default function RegisterForm({
       error={error}
       onBack={() => {
         setClientSecret(null);
+        setHoldExpiresAt(null);
         setError(null);
       }}
     />
@@ -507,7 +513,7 @@ export default function RegisterForm({
     return (
       <div className="kc-reg">
         <div className="kc-reg-main">
-          <InlineCheckout clientSecret={clientSecret} />
+          <InlineCheckout clientSecret={clientSecret} holdExpiresAt={holdExpiresAt} />
         </div>
         <aside className="kc-reg-side">{side}</aside>
       </div>

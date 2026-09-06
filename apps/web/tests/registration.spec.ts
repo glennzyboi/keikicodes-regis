@@ -1,6 +1,6 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
-import { attachPhoto, payWithTestCard } from "./helpers";
+import { attachPhoto, fillDate, payWithTestCard } from "./helpers";
 
 const sql = postgres(process.env.DATABASE_URL!, { prepare: false, onnotice: () => {} });
 
@@ -24,20 +24,16 @@ async function signUp(page: Page, email: string, name = "Test Parent") {
   await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
 }
 
-/**
- * The date field is three typed boxes rather than a calendar, because a
- * birthday is a date you know by heart and typing beats hunting.
+/*
+ * `fillDate` is imported from helpers.ts rather than living here.
  *
- * This used to be a byte-identical copy of the helper in helpers.ts, which is
- * how it came to be updated in one place and not the other.
+ * It used to be a local copy, with a comment noting it "used to be a
+ * byte-identical copy... which is how it came to be updated in one place and
+ * not the other". Keeping the copy and writing that down did not stop it
+ * happening again: the date field became three selects, helpers.ts was updated,
+ * and this file kept calling .fill() on a <select>. The comment was the fix
+ * that was never going to work. Deleting the duplicate is.
  */
-async function fillDate(page: Page, index: number, iso: string) {
-  const [year, month, day] = iso.split("-");
-  const block = page.locator(".df-parts").nth(index);
-  await block.locator(".df-d").fill(day);
-  await block.locator(".df-m").fill(month);
-  await block.locator(".df-y").fill(year);
-}
 
 test("registration requires an account, and sends you back where you were going", async ({
   page,

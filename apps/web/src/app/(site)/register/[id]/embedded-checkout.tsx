@@ -2,6 +2,7 @@
 
 import { loadStripe } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
+import { HoldTimer } from "./hold-timer";
 
 /**
  * Stripe's checkout, in our page.
@@ -26,7 +27,13 @@ import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe
  */
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
-export function InlineCheckout({ clientSecret }: { clientSecret: string }) {
+export function InlineCheckout({
+  clientSecret,
+  holdExpiresAt,
+}: {
+  clientSecret: string;
+  holdExpiresAt?: string | null;
+}) {
   return (
     <div className="kc-checkout">
       <div className="kc-checkout-head">
@@ -37,6 +44,11 @@ export function InlineCheckout({ clientSecret }: { clientSecret: string }) {
           </p>
         </div>
       </div>
+
+      {/* Above the card fields, because it is the constraint they are working
+          inside. Underneath the form it would be a footnote about a deadline
+          they have already missed. */}
+      <HoldTimer expiresAt={holdExpiresAt ?? null} />
 
       <EmbeddedCheckoutProvider stripe={stripePromise} options={{ clientSecret }}>
         <EmbeddedCheckout />

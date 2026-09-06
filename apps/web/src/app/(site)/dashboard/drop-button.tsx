@@ -6,29 +6,25 @@ import { PARENT_CANCEL_REASONS } from "@keiki/core/schedule-reasons";
 import { Modal } from "@/components/modal";
 
 /**
- * A parent asks to cancel, and says why.
+ * A parent drops their child from a class.
  *
- * Deliberately a request, not an action. Cancelling instantly would mean
- * deciding a refund automatically, and Keiki Coders has a refund policy we have
- * not seen. The seat stays held while the request is open, so nobody else takes
- * it while the office is deciding.
+ * Different from a cancellation and the difference is the point. Cancelling is
+ * a request that waits on an admin decision and usually ends in money going
+ * back. Dropping is a fact: the family is done, the seat is freed, and no
+ * refund is assumed.
  *
- * The reason is the part that is new, and it is worth a sentence on camera.
- * Asking "why" at the moment somebody leaves is the cheapest research a
- * business ever gets, and it costs the family one tap. A fixed list because
- * free text alone gives you "N/A" and forty different spellings of "the time
- * clashed"; a note box as well because no list survives a real reason. Choosing
- * "another reason" makes the note required, since an unexplained shrug is the
- * same as no answer.
+ * The dialog follows the same structure as the cancel button — a reason from a
+ * fixed list, an optional note, "other" forces the note — so the data quality
+ * is identical and the office can compare drop reasons with cancel reasons at
+ * the end of term.
  *
- * A dialog rather than a panel inside the card. The card is a summary somebody
- * is reading; growing a form inside it pushes everything below off the screen
- * mid-thought.
+ * If the family does want money back, the cancel button still exists for that
+ * and says so explicitly.
  */
-export function CancelButton({
+export function DropButton({
   enrollmentId,
   child,
-  className,
+  className: cssClass,
 }: {
   enrollmentId: string;
   child: string;
@@ -50,9 +46,6 @@ export function CancelButton({
     e.preventDefault();
     setError(null);
 
-    // Checked here as well as on the server. The server is the one that
-    // matters; this one exists so the answer is instant rather than a round
-    // trip away.
     if (!reason) {
       setError("Please choose a reason so we know how to help.");
       return;
@@ -64,7 +57,7 @@ export function CancelButton({
 
     setBusy(true);
     try {
-      const res = await fetch("/api/portal/cancel", {
+      const res = await fetch("/api/portal/drop", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enrollmentId, reasonCode: reason, note: note.trim() || undefined }),
@@ -74,7 +67,7 @@ export function CancelButton({
         const body = await res.json().catch(() => ({}));
         setError(
           body.error === "not_yours"
-            ? "That is not your registration, or it has already been cancelled."
+            ? "That registration was not found, or it has already been dropped."
             : body.error === "not_signed_in"
               ? "Your session has expired. Please sign in again."
               : (body.message ?? "Something went wrong. Please try again."),
@@ -103,22 +96,22 @@ export function CancelButton({
 
   return (
     <>
-      <button type="button" className={className} onClick={() => setOpen(true)}>
-        Request cancellation &amp; refund
+      <button type="button" className={cssClass} onClick={() => setOpen(true)}>
+        Drop from class
       </button>
 
       {open && (
         <Modal
-          title={`Cancel ${child}'s place?`}
-          description="The office will confirm the refund with you before anything is finalised. Their seat stays yours until they do."
+          title={`Drop ${child} from this class?`}
+          description="The seat is freed straight away. No refund is processed — if you need one, use &ldquo;Request cancellation &amp; refund&rdquo; instead."
           onClose={close}
           width={520}
         >
           {sent ? (
             <div>
               <p className="rounded-xl bg-green-100 px-4 py-3 text-sm text-green-900">
-                Thank you. We have your request and the office will be in touch about the
-                refund.
+                Done. {child} has been dropped from the class. If you have questions about a
+                refund, please get in touch with the office.
               </p>
               <div className="mt-4 flex justify-end">
                 <button type="button" className="kc-btn kc-btn-primary text-sm" onClick={close}>
@@ -129,16 +122,16 @@ export function CancelButton({
           ) : (
             <form onSubmit={submit} noValidate>
               <div className="kc-fieldset">
-                <label htmlFor={`why-${enrollmentId}`}>Why are you cancelling?</label>
+                <label htmlFor={`drop-why-${enrollmentId}`}>Why are you leaving?</label>
                 <select
-                  id={`why-${enrollmentId}`}
+                  id={`drop-why-${enrollmentId}`}
                   value={reason}
                   onChange={(e) => {
                     setReason(e.target.value);
                     setError(null);
                   }}
                   aria-invalid={Boolean(error && !reason)}
-                  aria-describedby={error ? `cancel-error-${enrollmentId}` : undefined}
+                  aria-describedby={error ? `drop-error-${enrollmentId}` : undefined}
                   required
                 >
                   <option value="" disabled>
@@ -153,14 +146,14 @@ export function CancelButton({
               </div>
 
               <div className="kc-fieldset mt-4">
-                <label htmlFor={`note-${enrollmentId}`}>
+                <label htmlFor={`drop-note-${enrollmentId}`}>
                   Anything else we should know?{" "}
                   <span className="font-normal text-ink-soft">
                     {needsNote ? "(required)" : "(optional)"}
                   </span>
                 </label>
                 <textarea
-                  id={`note-${enrollmentId}`}
+                  id={`drop-note-${enrollmentId}`}
                   rows={3}
                   maxLength={1000}
                   value={note}
@@ -176,7 +169,7 @@ export function CancelButton({
 
               {error && (
                 <p
-                  id={`cancel-error-${enrollmentId}`}
+                  id={`drop-error-${enrollmentId}`}
                   role="alert"
                   className="mt-3 rounded-xl border border-sun-deep bg-sun-soft/50 px-4 py-3 text-sm text-ink"
                 >
@@ -198,7 +191,7 @@ export function CancelButton({
                   className="kc-btn kc-btn-primary text-sm"
                   disabled={busy || pending}
                 >
-                  {busy ? "Sending" : "Send request"}
+                  {busy ? "Dropping" : "Drop from class"}
                 </button>
               </div>
             </form>

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Calendar, type CalendarEvent } from "@/components/calendar";
 import { ExpandableCard, Facts, Fact } from "@/components/expandable";
 import { CancelButton } from "./cancel-button";
+import { DropButton } from "./drop-button";
 
 /**
  * A parent's registrations, as a calendar and as cards.
@@ -67,8 +68,9 @@ export function DashboardView({
       ? registrations
       : registrations.filter((r) => r.childId === childFilter);
 
-  const live = visible.filter((r) => r.status !== "cancelled");
+  const live = visible.filter((r) => r.status !== "cancelled" && r.status !== "dropped");
   const cancelled = visible.filter((r) => r.status === "cancelled");
+  const dropped = visible.filter((r) => r.status === "dropped");
 
   const events: CalendarEvent[] = live.flatMap((r) =>
     r.sessions.map((s) => ({
@@ -216,8 +218,17 @@ export function DashboardView({
                       refund. The seat stays yours until they confirm.
                     </p>
                   ) : (
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      {/* Both text-sm. These sit side by side in one row, and
+                          every other button on this page is text-sm, so a
+                          smaller one next to a larger one reads as a mistake
+                          rather than as emphasis. */}
                       <CancelButton
+                        enrollmentId={r.enrollmentId}
+                        child={r.childName}
+                        className="kc-btn kc-btn-quiet text-sm"
+                      />
+                      <DropButton
                         enrollmentId={r.enrollmentId}
                         child={r.childName}
                         className="kc-btn kc-btn-quiet text-sm"
@@ -228,6 +239,25 @@ export function DashboardView({
               }
             />
           ))}
+
+          {dropped.length > 0 && (
+            <>
+              <h2 className="mt-10 font-display text-xl font-bold text-green-900">Dropped</h2>
+              <div className="mt-3 space-y-2">
+                {dropped.map((r) => (
+                  <div
+                    key={r.enrollmentId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-paper px-5 py-4 text-sm"
+                  >
+                    <span>
+                      <span className="font-medium">{r.childName}</span> in {r.title}
+                    </span>
+                    <span className="kc-chip">Dropped</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {cancelled.length > 0 && (
             <>

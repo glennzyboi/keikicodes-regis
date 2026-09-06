@@ -484,3 +484,37 @@ export const DropForm = z.object({
     .optional()
     .transform((v) => (v ? v : null)),
 });
+
+/**
+ * A parent dropping their own child from a class.
+ *
+ * Structurally the same as a cancellation request, but the outcome is different:
+ * no refund is assumed and the seat is freed immediately. The reason is still
+ * collected because it is the same cheap research, and "other" still requires
+ * words.
+ */
+export const ParentDropBody = z
+  .object({
+    enrollmentId: uuid,
+    reasonCode: z.enum([
+      "schedule_conflict",
+      "child_not_enjoying",
+      "moved_away",
+      "cost",
+      "illness",
+      "wrong_class",
+      "other",
+    ]),
+    note: z
+      .string()
+      .max(1000, "Please keep this under 1000 characters")
+      .optional()
+      .transform((v) => {
+        const cleaned = stripControl(v ?? "").trim();
+        return cleaned.length === 0 ? null : cleaned;
+      }),
+  })
+  .refine((v) => v.reasonCode !== "other" || (v.note && v.note.length >= 3), {
+    message: "Please tell us a little about why",
+    path: ["note"],
+  });

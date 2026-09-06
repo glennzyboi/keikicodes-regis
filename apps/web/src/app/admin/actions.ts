@@ -406,3 +406,53 @@ export async function dropFromClass(formData: FormData) {
     revalidatePath("/dashboard");
   }
 }
+
+/**
+ * Convert a cancellation request into a drop.
+ *
+ * The family asked for a cancellation (which implies a refund), but the office
+ * has decided the right outcome is a drop: the seat is freed, the child is off
+ * the roster, and no money moves. This is the third option alongside "approve
+ * and refund" and "decline, keep the place".
+ *
+ * Without this the office was forced into a false choice: pay back money nobody
+ * necessarily deserved, or leave the child on the roster and the seat locked.
+ * Both of those happened.
+ */
+export async function convertToDrop(formData: FormData) {
+  const staff = await currentStaff();
+  if (!staff) redirect("/admin/login");
+
+  const parsed = parseForm(EnrollmentIdForm, formData);
+  if (!parsed.ok) return;
+  const { enrollmentId } = parsed.data;
+
+  const done = await asUser(staff.authUserId, async (tx) => {
+    const [row] = await tx<{ id: string; class_offering_id: string }[]>`
+      update enrollments
+         set status = 'dropped',
+             refund_owed = false,
+             dropped_at = now(),
+             dropped_by = ${staff.email}
+       where id = ${enrollmentId}
+         and status = 'cancellation_requested'
+      returning id, class_offering_id`;
+
+    if (!row) return null;
+
+    await tx`select release_seat(${row.class_offering_id})`;
+    await tx`insert into enrollment_events (enrollment_id, event, payload)
+             values (${row.id}, 'cancellation_converted_to_drop',
+                     ${JSON.stringify({ by: staff.email })}::jsonb)`;
+    return row;
+  });
+
+  if (done) {
+    revalidatePath("/admin");
+    revalidatePath("/admin/cancellations");
+    revalidatePath("/admin/classes", "layout");
+    revalidatePath("/admin/students", "layout");
+    revalidatePath("/dashboard");
+  }
+}
+

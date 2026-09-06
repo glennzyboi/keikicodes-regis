@@ -16,7 +16,7 @@
 .df-parts {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 12px;
 }
 .df-parts:focus {
   outline: none;
@@ -30,7 +30,8 @@
   flex: 1 1 0;
 }
 .df-box:last-child {
-  flex-grow: 1.35;
+  flex-grow: 1.4;
+  min-width: 70px;
 }
 .df-box-label {
   font-size: 0.72rem;
@@ -86,8 +87,8 @@
   year is four digits. Overriding the generic ratios above, which were written
   for three equally narrow typed boxes.
 */
-.df-box-month { flex-grow: 2.1; }
-.df-box:last-child { flex-grow: 1.25; }
+.df-box-month { flex-grow: 2.5; min-width: 100px; }
+.df-box:last-child { flex-grow: 1.4; }
 
 /* Below this the three controls stop fitting on one line with a month name in
    the middle, so they stack rather than squeezing to unreadable widths. */

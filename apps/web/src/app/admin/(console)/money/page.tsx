@@ -28,7 +28,7 @@ import {
   when,
   ago,
 } from "@/app/admin/ui";
-import { declineCancellation, markRefunded, retryRefund } from "@/app/admin/actions";
+import { declineCancellation, markRefunded, retryRefund, convertToDrop } from "@/app/admin/actions";
 import { ApproveWithRefund } from "@/app/admin/approve-with-refund";
 import { MoneyTabs } from "./tabs";
 import { PaymentRowDetail } from "./payment-row";
@@ -407,6 +407,10 @@ async function Cancellations({
               <form action={declineCancellation}>
                 <input type="hidden" name="enrollmentId" value={r.enrollment_id} />
                 <button className="ops-btn">Decline, keep the place</button>
+              </form>
+              <form action={convertToDrop}>
+                <input type="hidden" name="enrollmentId" value={r.enrollment_id} />
+                <button className="ops-btn ops-btn-danger">Drop instead (no refund)</button>
               </form>
             </div>
           </section>

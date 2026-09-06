@@ -774,7 +774,7 @@ export default function RegisterForm({
                     <FieldError id={`grade-${i}`} message={problems[`grade-${i}`]} />
                   </div>
 
-                  <div>
+                  <div className="sm:col-span-2">
                     <DateField
                       label="Date of birth"
                       required
@@ -801,7 +801,7 @@ export default function RegisterForm({
                     <FieldError id={`dob-${i}`} message={problems[`dob-${i}`]} />
                   </div>
 
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-3">
                     <PhotoField
                       parentId={parentId}
                       label="Photo of your child"

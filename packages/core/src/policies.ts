@@ -12,7 +12,7 @@
  * timestamp, and changing the wording means bumping it. A parent who agreed to
  * v1 has agreed to v1 for ever, and the app can tell who has not yet seen v2.
  */
-export const POLICY_VERSION = "2026-09-05";
+export const POLICY_VERSION = "2026-09-07";
 
 export type PolicySection = { heading: string; body: string };
 
@@ -39,11 +39,19 @@ export const PARTICIPATION_POLICY: PolicySection[] = [
       "and either add a make up week or refund that session.",
   },
   {
-    heading: "Cancelling your place",
+    heading: "Dropping from a class",
     body:
-      "Ask us to cancel at any time from your account. We will confirm, and refund the " +
-      "sessions that have not yet run. Refunds go back to the card that paid, and take a " +
-      "few working days to appear.",
+      "You can drop your child from a class at any time from your account. The seat is " +
+      "freed straight away and the enrolment ends. No refund is processed automatically — " +
+      "if you believe you are owed one, use the cancellation option or contact the office.",
+  },
+  {
+    heading: "Cancelling and requesting a refund",
+    body:
+      "If you would like a refund for sessions that have not yet run, choose \"Request " +
+      "cancellation & refund\" from your account. The office will review your request, " +
+      "confirm the amount, and send the refund back to the card that paid. This usually " +
+      "takes a few working days.",
   },
   {
     heading: "Photographs",

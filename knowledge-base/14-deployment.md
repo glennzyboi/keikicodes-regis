@@ -92,6 +92,43 @@ To go to real production mail: put real people in the database, set
 `RESEND_API_KEY` with `EMAIL_TRANSPORT=resend`, and clear `DEMO_DATA`. Doing the
 middle one without the other two is exactly what the guard is for.
 
+## Hosted auth settings, which are not in this repo
+
+`supabase/config.toml` governs the **local** stack only. The hosted project's
+auth settings live in Supabase and are changed out of band, so nothing in this
+repository tests them or reviews a change to them. That gap has already caused
+one outage worth writing down.
+
+**What went wrong.** The hosted project shipped with `mailer_autoconfirm: false`
+and `rate_limit_email_sent: 2`. Every account created through `/signup` was
+therefore unconfirmed and could not sign in, and Supabase's shared sender would
+have given up after two confirmation emails an hour regardless. Locally
+confirmation is off, so the entire 155 test suite passed green against a
+deployment that was unusable for anybody who was not already in the database. It
+was found by signing up as a stranger, which is the only way it could have been
+found.
+
+**Current settings**, applied through the Management API:
+
+| Setting | Value | Why |
+|---|---|---|
+| `mailer_autoconfirm` | `true` | A prototype nobody can sign up to is not a prototype |
+| `smtp_host` / `smtp_user` | Gmail, same sender as the app | Supabase's shared sender is capped and rewrites nothing |
+| `rate_limit_email_sent` | `60` | Two an hour cannot survive one demo |
+
+```bash
+curl -X PATCH "https://api.supabase.com/v1/projects/<ref>/config/auth" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mailer_autoconfirm": true, "rate_limit_email_sent": 60}'
+```
+
+Note `smtp_port` has to be sent as a **string**; the API rejects the number.
+
+For a real build, these belong in a provisioning script that runs against the
+project and is reviewed like anything else. Leaving them as dashboard state is
+the same category of problem as an n8n workflow nobody can diff.
+
 ## What actually runs the worker
 
 Nothing on the deployment holds a timer: Vercel functions are request-scoped and

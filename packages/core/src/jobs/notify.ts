@@ -67,6 +67,25 @@ async function drain(dryRun: boolean, log: (s: string) => void, transport: Retur
 
   if (claimed.length === 0) return 0;
 
+  /*
+   * Which of the addresses in this batch did we invent?
+   *
+   * One query for the batch rather than one per message, and scoped to the
+   * addresses actually in hand rather than loading the whole table, so this
+   * costs the same on a database with thirty six seeded families as on one with
+   * none. In a real deployment demo_addresses is empty and this is a lookup
+   * that always answers "no".
+   */
+  const seeded = new Set(
+    (
+      await sql<{ address: string }[]>`
+        select lower(address) as address from demo_addresses
+         where lower(address) = any(${sql.array(
+           claimed.map((r) => r.to_address.trim().toLowerCase()),
+         )}::text[])`
+    ).map((r) => r.address),
+  );
+
   for (const row of claimed) {
     let rendered;
     try {
@@ -101,6 +120,12 @@ async function drain(dryRun: boolean, log: (s: string) => void, transport: Retur
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
+      // Resolved here, against the database, rather than inside the transport.
+      // The transport stays a thing that puts a message on a wire; deciding
+      // whether an address is one this system invented is a question about our
+      // data, and the worker is already holding a connection. See
+      // 20260906120000_demo_addresses.sql.
+      invented: seeded.has(row.to_address.trim().toLowerCase()),
     });
 
     if (result.ok) {

@@ -128,6 +128,15 @@ export async function seedFamilies(
       on conflict (email) do update set full_name = excluded.full_name
       returning id`;
 
+    // Written down the moment it is invented, so the notification worker can
+    // tell this apart from an address a real parent typed in. See the migration
+    // 20260906120000_demo_addresses.sql for why the rule is about the seed
+    // rather than about who is allowed to receive mail.
+    await sql`
+      insert into demo_addresses (address, note)
+      values (${email.toLowerCase()}, ${`seeded family: ${first} ${last}`})
+      on conflict (address) do nothing`;
+
     // Most families have one child, a good third have two. That ratio is the
     // reason the registration form takes several children on one order.
     const kids = i % 3 === 0 ? 2 : 1;

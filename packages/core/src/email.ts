@@ -20,6 +20,15 @@ export type Outbound = {
   subject: string;
   html: string;
   text: string;
+  /**
+   * True when this system made the address up.
+   *
+   * Resolved by the worker against `demo_addresses`, not guessed here. Absent
+   * means "a real person", which is the right default: a caller that forgets to
+   * set it delivers mail to somebody who asked for it, rather than silently
+   * swallowing a real parent's confirmation.
+   */
+  invented?: boolean;
 };
 
 export type SendResult = { ok: true; id: string } | { ok: false; error: string };
@@ -36,59 +45,46 @@ const FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Keiki Coders";
  * The demo stop.
  *
  * The prototype is seeded with thirty six believable families, and believable
- * means addresses like malia.kealoha@gmail.com — addresses that may well belong
- * to somebody. So DEMO_DATA=1 guarantees no seeded family is ever written to.
+ * means addresses like malia.kealoha@gmail.com, which may well belong to
+ * somebody who has never heard of Keiki Coders. Writing to one of those is the
+ * only unrecoverable mistake available in this codebase, so DEMO_DATA=1
+ * guarantees it cannot happen.
  *
- * It does that in one of two ways, and the difference matters.
+ * What it does NOT do is stop real people getting their mail. A parent who
+ * fills in the registration form gets their confirmation, because their address
+ * is one they typed rather than one this system made up. That distinction is a
+ * fact in the database (`demo_addresses`, written by the seed) resolved by the
+ * worker, not a guess made here.
  *
- * With DEMO_MAIL_TO set, every message is *redirected* to that one address,
- * with the intended recipient moved into the subject line and repeated at the
- * top of the body. This is the useful mode: a walkthrough shows real
- * confirmations arriving in a real inbox, delivery is genuinely exercised
- * end to end, and the only mailbox involved belongs to whoever is running the
- * demo. It is the same idea as a catch-all mail trap, done at the last possible
- * moment so nothing upstream has to know.
+ * The first version of this had it backwards: an allowlist naming who was
+ * permitted to receive mail, redirecting everyone else. Safe, and wrong, because
+ * it made a rule about the seed into a rule about strangers. A real parent's
+ * confirmation went to somebody else's inbox and the product looked broken from
+ * the only seat that matters.
  *
- * Without it, delivery is refused outright, because silently delivering to the
- * seed would be the one unrecoverable mistake here. The refusal is a returned
- * failure rather than a throw: the worker records the reason against the
- * message, the Outbox shows exactly why it did not go, and one badly addressed
- * batch cannot take the cron down.
+ * With no DEMO_MAIL_TO set, a seeded address is refused outright instead of
+ * redirected. The refusal is a returned failure rather than a throw: the worker
+ * records the reason, the Outbox shows exactly why it did not go, and one badly
+ * addressed batch cannot take the cron down.
  *
- * Clear DEMO_DATA when the database holds real people. That is the whole
+ * Clear DEMO_DATA when the database holds only real people. That is the whole
  * switch, and it is deliberately not the same switch as "have we got a mail
  * provider yet".
  */
 class DemoRedirectTransport implements EmailTransport {
   readonly name: string;
-  private allow: Set<string>;
 
   constructor(
     private inner: EmailTransport,
     private sink: string,
-    allow: string[] = [],
   ) {
     this.name = `${inner.name}→demo`;
-    this.allow = new Set(allow.map((a) => a.trim().toLowerCase()).filter(Boolean));
   }
 
   async send(message: Outbound): Promise<SendResult> {
-    /*
-     * A real person testing this should get their own mail.
-     *
-     * Redirecting *everything* to one inbox is right for the seed and wrong for
-     * whoever is evaluating the system: they sign up with their own address,
-     * their confirmation lands in somebody else's mailbox, and from where they
-     * are sitting the product looks broken. So DEMO_MAIL_ALLOW names the
-     * addresses that are known to be real and are allowed through untouched.
-     *
-     * An allowlist rather than a pattern, deliberately. Anything clever here —
-     * "let real-looking domains through", "only redirect gmail" — is a rule that
-     * eventually lets a seeded family through, and that is the one mistake this
-     * whole mechanism exists to prevent. If an address is not written down, it
-     * is treated as invented.
-     */
-    if (this.allow.has(message.to.trim().toLowerCase())) {
+    // Only what we invented is held back. Everyone else is a real person who
+    // asked for this message.
+    if (!message.invented) {
       return this.inner.send(message);
     }
 
@@ -111,13 +107,18 @@ class DemoRedirectTransport implements EmailTransport {
 }
 
 class DemoBlockedTransport implements EmailTransport {
-  readonly name = "demo-blocked";
+  readonly name: string;
+  constructor(private inner: EmailTransport) {
+    this.name = `${inner.name}→blocked`;
+  }
+
   async send(message: Outbound): Promise<SendResult> {
+    if (!message.invented) return this.inner.send(message);
     return {
       ok: false,
       error:
         `refused: DEMO_DATA=1 and DEMO_MAIL_TO is not set, so ${message.to} ` +
-        "was not written to. This database holds seeded families with realistic addresses.",
+        "was not written to. That address was invented by the seed.",
     };
   }
 }
@@ -298,9 +299,7 @@ export function emailTransport(): EmailTransport {
   // Last, and wrapping everything, so no route to a real send can skip it.
   if (process.env.DEMO_DATA === "1") {
     const sink = process.env.DEMO_MAIL_TO?.trim();
-    if (!sink) return new DemoBlockedTransport();
-    const allow = (process.env.DEMO_MAIL_ALLOW ?? "").split(",");
-    return new DemoRedirectTransport(inner, sink, allow);
+    return sink ? new DemoRedirectTransport(inner, sink) : new DemoBlockedTransport(inner);
   }
 
   return inner;

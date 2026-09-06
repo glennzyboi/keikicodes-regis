@@ -71,6 +71,86 @@ test.describe("the notification worker", () => {
     expect(after.subject, "the subject is stored once rendered").toContain("registered");
   });
 
+  /**
+   * The guard that decides who may be written to.
+   *
+   * This is the one rule in the system whose failure is unrecoverable: an
+   * address the seed invented, like malia.kealoha@gmail.com, may belong to a
+   * real person, and an email to them cannot be taken back. It is also the rule
+   * most likely to rot quietly, because nothing about the app looks different
+   * when it is wrong.
+   *
+   * Both directions are asserted, and the second matters as much as the first:
+   * an over-eager guard that swallows a real parent's confirmation is a broken
+   * product, not a safe one.
+   */
+  test("mail is held back for seeded addresses and delivered to real ones", async () => {
+    const { emailTransport } = await import("@keiki/core/email");
+
+    const previous = { demo: process.env.DEMO_DATA, sink: process.env.DEMO_MAIL_TO };
+    process.env.DEMO_DATA = "1";
+    process.env.DEMO_MAIL_TO = "sink@example.test";
+
+    try {
+      const transport = emailTransport();
+      const sent: string[] = [];
+      // Stand in for the wire. What is asserted is the address this system
+      // chose, which is the decision under test; whether Gmail accepts it is
+      // Gmail's business and is covered by the live run.
+      const inner = { send: async (m: { to: string }) => { sent.push(m.to); return { ok: true as const, id: "x" }; } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (transport as any).inner = inner;
+
+      await transport.send({
+        to: "malia.kealoha@gmail.com", subject: "s", html: "h", text: "t", invented: true,
+      });
+      expect(sent[0], "an invented address must never be written to").toBe("sink@example.test");
+
+      await transport.send({
+        to: "a.real.parent@example.test", subject: "s", html: "h", text: "t", invented: false,
+      });
+      expect(sent[1], "a real parent must get their own mail").toBe("a.real.parent@example.test");
+    } finally {
+      process.env.DEMO_DATA = previous.demo;
+      process.env.DEMO_MAIL_TO = previous.sink;
+    }
+  });
+
+  test("every seeded family is recorded as invented", async () => {
+    // The guard above is only as good as this table. A new demo scenario that
+    // adds a family and forgets to register its address would otherwise be
+    // discovered by an email arriving at a stranger's inbox.
+    //
+    // "No login" is the shape of a seeded family: real people arrive by signing
+    // up, which mints an auth user. The one exception is checked separately
+    // below, and it is the exception that nearly slipped through.
+    const missing = await sql<{ email: string }[]>`
+      select p.email from parents p
+       where p.auth_user_id is null
+         and not exists (
+           select 1 from demo_addresses d where lower(d.address) = lower(p.email))`;
+    expect(
+      missing.map((m) => m.email),
+      "seeded families with no demo_addresses row could be emailed for real",
+    ).toEqual([]);
+  });
+
+  test("the demo parent login counts as invented, despite having a password", async () => {
+    /*
+     * Malia has a login, so she reads as a real account rather than as seed
+     * data. She is not: her address was made up by the seed and may belong to
+     * somebody. Having a password and being a real person are different things.
+     *
+     * This is asserted on its own because registering as her is the most likely
+     * way to accidentally mail a stranger during a walkthrough, precisely
+     * because she feels like the safe account to use.
+     */
+    const [row] = await sql<{ c: number }[]>`
+      select count(*)::int as c from demo_addresses
+       where lower(address) = 'malia.kealoha@gmail.com'`;
+    expect(row.c, "the demo parent must be redirected like any other seed row").toBe(1);
+  });
+
   test("draining twice leaves nothing to send", async () => {
     // Drain whatever is outstanding first. Other specs queue mail as a side
     // effect of registering, so asserting on a single run would be asserting

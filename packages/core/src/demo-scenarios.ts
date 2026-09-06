@@ -350,5 +350,29 @@ export async function seedScenarios(sql: Sql): Promise<Scenarios> {
       `${tight.title} — ${tight.capacity} seats, for the oversell story`;
   }
 
+  /*
+   * Every address this file invented, written down.
+   *
+   * Kept as one list at the end rather than an insert beside each parent,
+   * because the property that matters is "all of them, without exception" and
+   * that is easier to check in one place than to trust across four. If a future
+   * scenario adds a fifth family, the test that counts parents against
+   * demo_addresses is what will catch the omission.
+   *
+   * See 20260906120000_demo_addresses.sql: mail to these is redirected, and
+   * anybody not on this list typed their address in themselves and gets their
+   * own mail.
+   */
+  const invented = await sql<{ email: string; full_name: string }[]>`
+    select email, full_name from parents
+     where email in ('noelani.kahananui@gmail.com', 'gordon.wong@yahoo.com',
+                     'rachel.silva@gmail.com', 'marissa.tanaka@icloud.com')`;
+  for (const p of invented) {
+    await sql`
+      insert into demo_addresses (address, note)
+      values (${p.email.toLowerCase()}, ${`seeded scenario: ${p.full_name}`})
+      on conflict (address) do nothing`;
+  }
+
   return out;
 }

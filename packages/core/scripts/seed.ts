@@ -92,9 +92,13 @@ async function main() {
 
   // Families, money and seats go. The catalogue stays and is updated in place.
   console.log("Clearing families, orders and seats...");
+  // demo_addresses goes with the families it describes. Leaving it behind would
+  // mean an address that is no longer in the database still silently
+  // redirecting somebody's mail, which is the sort of stale rule nobody thinks
+  // to look for.
   await sql`truncate table enrollment_events, session_events, webhook_events, seat_holds,
             enrollments, order_items, orders, consents, guardians, children, parents,
-            notifications, support_notes
+            notifications, support_notes, demo_addresses
             restart identity cascade`;
   await sql`update class_offerings set seats_taken = 0`;
 
@@ -234,6 +238,25 @@ async function main() {
             on conflict (email) do update
               set auth_user_id = excluded.auth_user_id,
                   full_name = excluded.full_name`;
+
+  /*
+   * The demo parent is invented too, and that is easy to miss.
+   *
+   * Malia has a password and a login, so she reads as "a real account we use"
+   * rather than as seed data. She is not: malia.kealoha@gmail.com is an address
+   * this script made up, and it may belong to somebody. Having a login and
+   * being a real person are different things, and the guard cares about the
+   * second.
+   *
+   * Registering as her during a walkthrough is the single most likely way to
+   * send mail to a stranger, precisely because it feels like the safe account.
+   * Her confirmations go to the demo inbox with her name in the subject, which
+   * is what you want to show anyway.
+   */
+  await sql`
+    insert into demo_addresses (address, note)
+    values (${DEMO_PARENT_EMAIL.toLowerCase()}, 'the demo parent login: invented, despite having a password')
+    on conflict (address) do nothing`;
 
   // A believable set of families, unless the caller only wants the catalogue.
   //

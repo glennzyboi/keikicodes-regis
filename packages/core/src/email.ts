@@ -61,14 +61,37 @@ const FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Keiki Coders";
  */
 class DemoRedirectTransport implements EmailTransport {
   readonly name: string;
+  private allow: Set<string>;
+
   constructor(
     private inner: EmailTransport,
     private sink: string,
+    allow: string[] = [],
   ) {
     this.name = `${inner.name}→demo`;
+    this.allow = new Set(allow.map((a) => a.trim().toLowerCase()).filter(Boolean));
   }
 
   async send(message: Outbound): Promise<SendResult> {
+    /*
+     * A real person testing this should get their own mail.
+     *
+     * Redirecting *everything* to one inbox is right for the seed and wrong for
+     * whoever is evaluating the system: they sign up with their own address,
+     * their confirmation lands in somebody else's mailbox, and from where they
+     * are sitting the product looks broken. So DEMO_MAIL_ALLOW names the
+     * addresses that are known to be real and are allowed through untouched.
+     *
+     * An allowlist rather than a pattern, deliberately. Anything clever here —
+     * "let real-looking domains through", "only redirect gmail" — is a rule that
+     * eventually lets a seeded family through, and that is the one mistake this
+     * whole mechanism exists to prevent. If an address is not written down, it
+     * is treated as invented.
+     */
+    if (this.allow.has(message.to.trim().toLowerCase())) {
+      return this.inner.send(message);
+    }
+
     const note =
       `This is a demonstration message. It was addressed to ${message.to}` +
       `${message.toName ? ` (${message.toName})` : ""} and redirected here ` +
@@ -275,7 +298,9 @@ export function emailTransport(): EmailTransport {
   // Last, and wrapping everything, so no route to a real send can skip it.
   if (process.env.DEMO_DATA === "1") {
     const sink = process.env.DEMO_MAIL_TO?.trim();
-    return sink ? new DemoRedirectTransport(inner, sink) : new DemoBlockedTransport();
+    if (!sink) return new DemoBlockedTransport();
+    const allow = (process.env.DEMO_MAIL_ALLOW ?? "").split(",");
+    return new DemoRedirectTransport(inner, sink, allow);
   }
 
   return inner;

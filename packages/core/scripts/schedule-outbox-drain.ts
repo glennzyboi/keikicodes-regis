@@ -49,11 +49,17 @@ async function main() {
   // own. Both values are ours and neither comes from a user, but they are still
   // quoted through Postgres' own literal quoting rather than string concatenated
   // by hand.
+  // The casts are load-bearing: format() is variadic over "any", so Postgres
+  // cannot infer a type for a bare parameter and refuses the statement with
+  // 42P18 rather than guessing.
   const [{ command }] = await sql<{ command: string }[]>`
     select format(
       'select net.http_post(url := %L, headers := %L::jsonb)',
-      ${url},
-      ${JSON.stringify({ "content-type": "application/json", "x-job-secret": JOB_SECRET })}
+      ${url}::text,
+      ${JSON.stringify({
+        "content-type": "application/json",
+        "x-job-secret": JOB_SECRET,
+      })}::text
     ) as command`;
 
   await sql`select cron.schedule(${JOB_NAME}, '* * * * *', ${command})`;

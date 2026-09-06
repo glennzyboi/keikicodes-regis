@@ -29,12 +29,25 @@ The catalogue API is on Render at **https://keiki-api.onrender.com** —
 free instance, so the first request after a quiet spell takes about a minute
 while it wakes up. Every request after that is immediate.
 
-**Email is deliberately switched off.** The database holds thirty six seeded
-families with realistic gmail addresses, which may belong to real people, so
-`DEMO_DATA=1` makes the mail transport refuse to deliver and record why. You
-will see confirmations arrive in the console's **Outbox** and stay there. That
-is the guard working, not a failure. `14-deployment.md` has the three things
-that have to be true before real mail is switched on.
+**Email really sends.** Confirmations, cancellation notices and reminders go out
+over Gmail SMTP, drained from the outbox once a minute by a job in the database
+itself. Payment to inbox is about thirty seconds.
+
+Two rules decide where a message lands, and they matter if you are showing this
+to somebody:
+
+- **Sign up with your own address and you get your own mail.** Addresses listed
+  in `DEMO_MAIL_ALLOW` are delivered untouched. Currently
+  `jgfabul@addu.edu.ph` and `jhonglennlaguardia@gmail.com` — add whoever is
+  testing.
+- **Anything else is redirected**, because the seed contains thirty six
+  believable addresses like `malia.kealoha@gmail.com` that may belong to real
+  people. Those arrive in the demo inbox with the subject prefixed
+  `[demo → malia.kealoha@gmail.com]`. That prefix is the guard working, and it
+  is worth pointing at on camera.
+
+Either way the message is real, and the Outbox in the console shows it move from
+queued to sent with the provider's message id against it.
 
 ---
 
